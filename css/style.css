@@ -122,19 +122,23 @@ html, body {
   100% { background: rgba(8,14,28,0.72); }
 }
 
-.shield-track {
-  width: 120px; height: 10px;
+.bar-track {
+  width: 110px; height: 10px;
   background: #07101e;
   border: 1px solid rgba(57,255,136,0.35);
   border-radius: 6px;
   overflow: hidden;
 }
-#shield-fill {
+.bar-fill {
   height: 100%;
   width: 100%;
   background: linear-gradient(90deg, var(--neon-green), var(--neon-cyan));
   box-shadow: 0 0 10px var(--neon-green);
-  transition: width 0.2s ease, background 0.2s ease;
+  transition: width 0.15s ease, background 0.2s ease;
+}
+.bar-fill.boost {
+  background: linear-gradient(90deg, var(--neon-amber), var(--neon-cyan));
+  box-shadow: 0 0 10px var(--neon-cyan);
 }
 
 /* Centered overlay (start / win / lose) */
@@ -276,12 +280,48 @@ html, body {
 /* Action buttons */
 .action-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 10px;
   width: 100%;
 }
-.action-btn { padding: 14px 0; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+.action-btn {
+  position: relative;
+  padding: 14px 0 16px;
+  font-size: 12px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  overflow: hidden;
+}
 .btn-icon { font-size: 14px; }
+
+/* Cooldown / charge meter at the bottom of action buttons */
+.cd-bar {
+  position: absolute;
+  left: 4px; right: 4px; bottom: 4px;
+  height: 4px;
+  border-radius: 3px;
+  background: rgba(0,0,0,0.45);
+  overflow: hidden;
+}
+.cd-bar i {
+  display: block; height: 100%; width: 0%;
+  background: currentColor;
+  opacity: 0.85;
+  transition: width 0.08s linear;
+}
+.action-btn.ready { box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 3px 0 #0c1124, 0 0 16px rgba(255,255,255,0.18); }
+.action-btn.ready .cd-bar i { opacity: 1; }
+
+#boost-btn {
+  border-color: var(--neon-cyan);
+  color: #cdfbff;
+  background: linear-gradient(180deg, #143c52, #0c2230);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 3px 0 #07161f, 0 0 14px rgba(47,243,255,0.22);
+}
+#boost-btn.fire, #boost-btn.active {
+  color: #04121a;
+  background: linear-gradient(180deg, var(--neon-cyan), #0bb6c9);
+  box-shadow: 0 0 26px rgba(47,243,255,0.85), inset 0 1px 0 rgba(255,255,255,0.5);
+}
 
 #laser-btn {
   border-color: var(--neon-pink);
@@ -368,4 +408,167 @@ html, body {
 @media (max-width: 880px) {
   #dashboard { flex-wrap: wrap; height: auto; max-height: 46%; overflow-y: auto; }
   #cluster-center { order: -1; flex-basis: 100%; }
+}
+
+/* ============================================================
+   New high-quality UI components
+   ============================================================ */
+
+/* --- Top-right cabin controls --- */
+#topbar {
+  position: absolute;
+  top: 18px; right: 24px;
+  display: flex; gap: 8px;
+  z-index: 15;
+}
+.icon-btn {
+  width: 34px; height: 34px;
+  border-radius: 9px;
+  border: 1px solid rgba(47,243,255,0.4);
+  background: rgba(8,14,28,0.75);
+  color: #cfe8ff;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(2px);
+  box-shadow: 0 0 12px rgba(47,243,255,0.12);
+  transition: transform 0.08s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.icon-btn:hover { background: rgba(20,34,60,0.9); box-shadow: 0 0 16px rgba(47,243,255,0.35); }
+.icon-btn:active { transform: translateY(2px); }
+
+/* --- Damage flash --- */
+#damage-flash {
+  position: absolute; inset: 12px;
+  border-radius: 14px;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 12;
+  background: radial-gradient(circle at 50% 55%, rgba(255,40,60,0) 40%, rgba(255,30,50,0.7) 100%);
+  transition: opacity 0.12s ease;
+}
+
+/* --- VIP rescue beacon --- */
+#vip-beacon {
+  position: absolute;
+  left: 50%; top: 55%;
+  display: none;
+  align-items: center;
+  pointer-events: none;
+  z-index: 13;
+  color: #ffd750;
+  filter: drop-shadow(0 0 8px rgba(255,215,80,0.9));
+}
+#vip-beacon.on { display: flex; }
+#vip-beacon .beacon-arrow { font-size: 26px; line-height: 1; }
+#vip-beacon .beacon-label {
+  font-size: 10px; font-weight: 800; letter-spacing: 1px;
+  margin-left: 2px;
+  background: rgba(8,14,28,0.7);
+  padding: 1px 4px; border-radius: 4px;
+}
+
+/* --- Help strip --- */
+#help-strip {
+  position: absolute;
+  left: 50%; bottom: 14px;
+  transform: translateX(-50%);
+  display: flex; gap: 14px; flex-wrap: wrap; justify-content: center;
+  padding: 6px 14px;
+  background: rgba(8,14,28,0.62);
+  border: 1px solid rgba(47,243,255,0.25);
+  border-radius: 10px;
+  font-size: 11px; letter-spacing: 0.5px;
+  color: var(--text-soft);
+  z-index: 11;
+  backdrop-filter: blur(2px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+#help-strip b { color: var(--neon-amber); }
+#help-strip.hidden { opacity: 0; transform: translateX(-50%) translateY(14px); pointer-events: none; }
+
+/* --- Confetti / fireworks canvas --- */
+#confetti {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+.overlay-card { position: relative; z-index: 2; }
+
+/* --- Difficulty selector --- */
+.diff-select { margin: 14px 0 6px; }
+.diff-label { display: block; font-size: 11px; letter-spacing: 3px; color: var(--neon-cyan); margin-bottom: 8px; }
+.diff-row { display: flex; gap: 10px; justify-content: center; }
+.diff-btn {
+  flex: 1; max-width: 130px;
+  padding: 10px 0;
+  font-family: inherit; font-weight: 800; letter-spacing: 1.5px;
+  color: #cfe0ff;
+  background: linear-gradient(180deg, #1e2746, #141a30);
+  border: 1px solid #3a4a78;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: transform 0.06s ease, box-shadow 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.diff-btn:active { transform: translateY(2px); }
+.diff-btn.active {
+  color: #04121a;
+  background: linear-gradient(180deg, var(--neon-cyan), #0bb6c9);
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 18px rgba(47,243,255,0.6);
+}
+
+.overlay-best { color: var(--text-soft); font-size: 13px; letter-spacing: 1px; margin: 12px 0 4px; }
+.overlay-best span { color: var(--neon-amber); font-weight: 800; font-family: "Consolas", monospace; }
+.overlay-best.new { color: var(--neon-green); font-weight: 800; animation: pulseBest 1s ease infinite; }
+@keyframes pulseBest { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+/* --- End-screen stat grid --- */
+.stat-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px; margin: 16px 0;
+}
+.stat-grid > div {
+  background: rgba(8,14,28,0.6);
+  border: 1px solid rgba(47,243,255,0.25);
+  border-radius: 9px;
+  padding: 8px 6px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.stat-grid span { font-size: 9px; letter-spacing: 1px; color: var(--text-soft); }
+.stat-grid b { font-size: 18px; color: #fff; font-family: "Consolas", monospace; }
+
+/* --- Secondary text button --- */
+.text-btn {
+  display: block; margin: 12px auto 0;
+  background: none; border: none;
+  color: var(--text-soft); font-family: inherit; font-size: 12px;
+  letter-spacing: 1px; cursor: pointer; text-decoration: underline;
+}
+.text-btn:hover { color: var(--neon-cyan); }
+
+/* --- Pause overlay + settings --- */
+#pause-overlay {
+  position: absolute; inset: 12px;
+  border-radius: 14px;
+  display: none;
+  align-items: center; justify-content: center;
+  background: radial-gradient(circle at 50% 40%, rgba(10,16,34,0.88), rgba(3,5,12,0.96));
+  z-index: 22; text-align: center; padding: 20px;
+}
+#pause-overlay.show { display: flex; }
+.settings { display: flex; flex-direction: column; gap: 10px; margin: 18px auto; max-width: 240px; text-align: left; }
+.toggle {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 14px; color: #cfe0ff; cursor: pointer;
+  padding: 8px 12px; border-radius: 9px;
+  background: rgba(8,14,28,0.6); border: 1px solid rgba(47,243,255,0.2);
+}
+.toggle input { width: 16px; height: 16px; accent-color: #2ff3ff; cursor: pointer; }
+
+/* --- Accessibility: reduced motion --- */
+@media (prefers-reduced-motion: reduce) {
+  .overlay-card { animation: none; }
+  .overlay-best.new { animation: none; }
 }

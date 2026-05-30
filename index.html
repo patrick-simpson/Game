@@ -14,12 +14,26 @@
       <div id="windshield-frame">
         <canvas id="view" width="960" height="430"></canvas>
 
-        <!-- Heads-up overlays drawn over the windshield glass -->
+        <!-- Damage feedback flash (Improvement #10) -->
+        <div id="damage-flash"></div>
+
+        <!-- Top-right cabin controls (Improvement #20) -->
+        <div id="topbar">
+          <button class="icon-btn" id="mute-btn" title="Mute (M)">&#128266;</button>
+          <button class="icon-btn" id="pause-btn" title="Pause (P)">&#10073;&#10073;</button>
+          <button class="icon-btn" id="help-btn" title="Help (H)">?</button>
+        </div>
+
+        <!-- Heads-up overlays -->
         <div id="hud">
           <div class="hud-left">
             <div class="hud-pill">
               <span class="hud-label">SHIELD</span>
-              <div class="shield-track"><div id="shield-fill"></div></div>
+              <div class="bar-track"><div id="shield-fill" class="bar-fill"></div></div>
+            </div>
+            <div class="hud-pill">
+              <span class="hud-label">BOOST</span>
+              <div class="bar-track"><div id="boost-fill" class="bar-fill boost"></div></div>
             </div>
             <div class="hud-pill">
               <span class="hud-label">SPEED</span>
@@ -27,6 +41,14 @@
             </div>
           </div>
           <div class="hud-right">
+            <div class="hud-pill">
+              <span class="hud-label">TIME</span>
+              <span id="time-readout" class="hud-value">0:00</span>
+            </div>
+            <div class="hud-pill">
+              <span class="hud-label">SCORE</span>
+              <span id="score-readout" class="hud-value">0</span>
+            </div>
             <div class="hud-pill">
               <span class="hud-label">DISTANCE TO VIP</span>
               <span id="dist-readout" class="hud-value">--</span>
@@ -38,25 +60,60 @@
           </div>
         </div>
 
-        <!-- Glass reflection sheen -->
+        <!-- VIP rescue beacon — appears only when close (Improvement #11) -->
+        <div id="vip-beacon"><span class="beacon-arrow">&#10148;</span><span class="beacon-label">VIP</span></div>
+
+        <!-- Control hint strip (Improvement #19) -->
+        <div id="help-strip">
+          <span><b>&larr;&rarr;</b> Steer</span>
+          <span><b>&uarr;&darr;</b> Speed</span>
+          <span><b>Space</b> Laser</span>
+          <span><b>J</b> Jump</span>
+          <span><b>B</b> Boost</span>
+          <span><b>P</b> Pause</span>
+          <span><b>M</b> Mute</span>
+          <span><b>H</b> Hide</span>
+        </div>
+
         <div id="glass-sheen"></div>
 
-        <!-- Centered messages: start / win / game over -->
+        <!-- Start / win / lose overlay -->
         <div id="overlay" class="overlay-show">
+          <canvas id="confetti" width="960" height="430"></canvas>
           <div class="overlay-card">
             <h1 class="overlay-title">ULTRA MAZE DRIVER</h1>
             <p class="overlay-sub">MEGA MAZE RESCUE &mdash; DASHBOARD SIMULATOR</p>
             <p class="overlay-text">
-              A VIP is lost somewhere deep in the containment zone. Drive the spy car
-              through the maze, dodge rogue drivers &amp; creatures, avoid the pedestrians,
-              and reach the VIP to complete the rescue.
+              A VIP is lost deep in the containment zone. Drive the spy car through the
+              maze, dodge rogue drivers &amp; creatures, avoid pedestrians, grab shield
+              cells, and reach the VIP to complete the rescue.
             </p>
-            <ul class="overlay-keys">
-              <li><b>&larr; &rarr;</b> Steer &nbsp;|&nbsp; <b>&uarr; / &darr;</b> Faster / Slower</li>
-              <li><b>Space</b> Fire Laser &nbsp;|&nbsp; <b>J / Shift</b> Jump Rocket</li>
-              <li><b>G</b> Go &nbsp;|&nbsp; <b>S</b> Stop</li>
-            </ul>
+
+            <div class="diff-select">
+              <span class="diff-label">DIFFICULTY</span>
+              <div class="diff-row">
+                <button class="diff-btn" data-diff="EASY">EASY</button>
+                <button class="diff-btn active" data-diff="NORMAL">NORMAL</button>
+                <button class="diff-btn" data-diff="HARD">HARD</button>
+              </div>
+            </div>
+
+            <p class="overlay-best">BEST TIME: <span id="best-time">--</span></p>
             <button id="start-btn" class="big-btn">START ENGINE</button>
+          </div>
+        </div>
+
+        <!-- Pause overlay + settings (Improvements #13, #14) -->
+        <div id="pause-overlay">
+          <div class="overlay-card">
+            <h1 class="overlay-title">PAUSED</h1>
+            <div class="settings">
+              <label class="toggle"><input type="checkbox" id="opt-shake" checked /> Screen shake</label>
+              <label class="toggle"><input type="checkbox" id="opt-motion" /> Reduce motion</label>
+              <label class="toggle"><input type="checkbox" id="opt-mute" /> Mute audio</label>
+            </div>
+            <button id="resume-btn" class="big-btn">RESUME</button>
+            <button id="quit-btn" class="text-btn">Quit to menu</button>
           </div>
         </div>
       </div>
@@ -64,7 +121,6 @@
 
     <!-- ===================== DASHBOARD ===================== -->
     <section id="dashboard">
-      <!-- LEFT cluster: speed + action buttons -->
       <div class="dash-cluster" id="cluster-left">
         <div class="cluster-title">DRIVE SYSTEM</div>
         <div class="speed-grid">
@@ -76,14 +132,19 @@
         <div class="action-grid">
           <button class="dash-btn action-btn" id="laser-btn">
             <span class="btn-icon">&#9650;</span> LASER
+            <span class="cd-bar"><i id="laser-cd"></i></span>
           </button>
           <button class="dash-btn action-btn" id="jump-btn">
-            <span class="btn-icon">&#10548;</span> JUMP ROCKET
+            <span class="btn-icon">&#10548;</span> JUMP
+            <span class="cd-bar"><i id="jump-cd"></i></span>
+          </button>
+          <button class="dash-btn action-btn" id="boost-btn">
+            <span class="btn-icon">&#187;</span> BOOST
+            <span class="cd-bar"><i id="boost-cd"></i></span>
           </button>
         </div>
       </div>
 
-      <!-- CENTER cluster: steering wheel -->
       <div class="dash-cluster" id="cluster-center">
         <div class="cluster-title">STEERING</div>
         <div id="wheel-housing">
@@ -92,7 +153,6 @@
         <div id="heading-readout">HEADING <span id="heading-val">N</span></div>
       </div>
 
-      <!-- RIGHT cluster: mini-map -->
       <div class="dash-cluster" id="cluster-right">
         <div class="cluster-title">TACTICAL MINI-MAP</div>
         <div id="map-housing">
@@ -102,12 +162,13 @@
         <div class="map-legend">
           <span><i class="dot player"></i> YOU</span>
           <span><i class="dot hostile"></i> THREAT</span>
+          <span><i class="dot heal"></i> CELL</span>
         </div>
       </div>
     </section>
   </div>
 
-  <!-- Scripts: load order matters (shared namespace MMR) -->
+  <script src="js/audio.js"></script>
   <script src="js/maze.js"></script>
   <script src="js/dashboard.js"></script>
   <script src="js/game.js"></script>
