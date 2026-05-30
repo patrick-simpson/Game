@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ultra Maze Driver &mdash; Mega Maze Rescue: Dashboard Simulator</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="cabin">
+
+    <!-- ===================== WINDSHIELD ===================== -->
+    <section id="windshield">
+      <div id="windshield-frame">
+        <canvas id="view" width="960" height="430"></canvas>
+
+        <!-- Heads-up overlays drawn over the windshield glass -->
+        <div id="hud">
+          <div class="hud-left">
+            <div class="hud-pill">
+              <span class="hud-label">SHIELD</span>
+              <div class="shield-track"><div id="shield-fill"></div></div>
+            </div>
+            <div class="hud-pill">
+              <span class="hud-label">SPEED</span>
+              <span id="speed-readout" class="hud-value">STOP</span>
+            </div>
+          </div>
+          <div class="hud-right">
+            <div class="hud-pill">
+              <span class="hud-label">DISTANCE TO VIP</span>
+              <span id="dist-readout" class="hud-value">--</span>
+            </div>
+            <div class="hud-pill warn" id="warn-pill">
+              <span class="hud-label">PEDESTRIAN HITS</span>
+              <span id="warn-readout" class="hud-value">0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Glass reflection sheen -->
+        <div id="glass-sheen"></div>
+
+        <!-- Centered messages: start / win / game over -->
+        <div id="overlay" class="overlay-show">
+          <div class="overlay-card">
+            <h1 class="overlay-title">ULTRA MAZE DRIVER</h1>
+            <p class="overlay-sub">MEGA MAZE RESCUE &mdash; DASHBOARD SIMULATOR</p>
+            <p class="overlay-text">
+              A VIP is lost somewhere deep in the containment zone. Drive the spy car
+              through the maze, dodge rogue drivers &amp; creatures, avoid the pedestrians,
+              and reach the VIP to complete the rescue.
+            </p>
+            <ul class="overlay-keys">
+              <li><b>&larr; &rarr;</b> Steer &nbsp;|&nbsp; <b>&uarr; / &darr;</b> Faster / Slower</li>
+              <li><b>Space</b> Fire Laser &nbsp;|&nbsp; <b>J / Shift</b> Jump Rocket</li>
+              <li><b>G</b> Go &nbsp;|&nbsp; <b>S</b> Stop</li>
+            </ul>
+            <button id="start-btn" class="big-btn">START ENGINE</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== DASHBOARD ===================== -->
+    <section id="dashboard">
+      <!-- LEFT cluster: speed + action buttons -->
+      <div class="dash-cluster" id="cluster-left">
+        <div class="cluster-title">DRIVE SYSTEM</div>
+        <div class="speed-grid">
+          <button class="dash-btn speed-btn" data-speed="GO">GO</button>
+          <button class="dash-btn speed-btn" data-speed="STOP">STOP</button>
+          <button class="dash-btn speed-btn" data-speed="SLOW">SLOW</button>
+          <button class="dash-btn speed-btn" data-speed="FAST">FAST</button>
+        </div>
+        <div class="action-grid">
+          <button class="dash-btn action-btn" id="laser-btn">
+            <span class="btn-icon">&#9650;</span> LASER
+          </button>
+          <button class="dash-btn action-btn" id="jump-btn">
+            <span class="btn-icon">&#10548;</span> JUMP ROCKET
+          </button>
+        </div>
+      </div>
+
+      <!-- CENTER cluster: steering wheel -->
+      <div class="dash-cluster" id="cluster-center">
+        <div class="cluster-title">STEERING</div>
+        <div id="wheel-housing">
+          <canvas id="wheel" width="220" height="220"></canvas>
+        </div>
+        <div id="heading-readout">HEADING <span id="heading-val">N</span></div>
+      </div>
+
+      <!-- RIGHT cluster: mini-map -->
+      <div class="dash-cluster" id="cluster-right">
+        <div class="cluster-title">TACTICAL MINI-MAP</div>
+        <div id="map-housing">
+          <canvas id="minimap" width="190" height="190"></canvas>
+          <div class="map-scanline"></div>
+        </div>
+        <div class="map-legend">
+          <span><i class="dot player"></i> YOU</span>
+          <span><i class="dot hostile"></i> THREAT</span>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Scripts: load order matters (shared namespace MMR) -->
+  <script src="js/maze.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
