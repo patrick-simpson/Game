@@ -364,15 +364,15 @@ html, body {
 /* --- Steering wheel --- */
 #wheel-housing {
   position: relative;
-  width: 220px;
-  height: 220px;
+  width: clamp(150px, 30vw, 220px);
+  height: clamp(150px, 30vw, 220px);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 #wheel {
-  width: 220px;
-  height: 220px;
+  width: clamp(150px, 30vw, 220px);
+  height: clamp(150px, 30vw, 220px);
   cursor: grab;
   touch-action: none;
   filter: drop-shadow(0 0 12px rgba(47,243,255,0.35));
@@ -389,15 +389,15 @@ html, body {
 /* --- Mini-map --- */
 #map-housing {
   position: relative;
-  width: 190px;
-  height: 190px;
+  width: clamp(140px, 24vw, 190px);
+  height: clamp(140px, 24vw, 190px);
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid #2c6b6f;
   background: #02100f;
   box-shadow: inset 0 0 26px rgba(0,0,0,0.8), 0 0 14px rgba(47,243,255,0.15);
 }
-#minimap { display: block; width: 190px; height: 190px; image-rendering: pixelated; }
+#minimap { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
 .map-scanline {
   position: absolute;
   inset: 0;
@@ -415,11 +415,30 @@ html, body {
 .map-legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; margin-right: 4px; }
 .dot.player  { background: var(--neon-cyan); box-shadow: 0 0 8px var(--neon-cyan); }
 .dot.hostile { background: var(--neon-red); box-shadow: 0 0 8px var(--neon-red); }
+.dot.heal    { background: var(--neon-green); box-shadow: 0 0 8px var(--neon-green); } /* B6 */
 
 /* Responsive squeeze */
 @media (max-width: 880px) {
-  #dashboard { flex-wrap: wrap; height: auto; max-height: 46%; overflow-y: auto; }
+  #dashboard { flex-wrap: wrap; height: auto; max-height: 46%; overflow-y: auto; gap: 10px; padding: 10px; }
   #cluster-center { order: -1; flex-basis: 100%; }
+}
+/* A5/A6: tighter layout + HUD on small screens */
+@media (max-width: 620px) {
+  #dashboard { gap: 8px; padding: 8px; }
+  .dash-cluster { padding: 8px 10px; }
+  .cluster-title { font-size: 9px; letter-spacing: 2px; margin-bottom: 6px; }
+  .speed-btn { padding: 10px 0; font-size: 14px; }
+  .action-btn { padding: 10px 0 12px; font-size: 10px; }
+  #hud { inset: 12px 12px auto 12px; font-size: 10px; }
+  .hud-pill { padding: 4px 7px; gap: 5px; }
+  .hud-right { flex-wrap: wrap; max-width: 60%; }
+  .bar-track { width: 78px; }
+  #dist-pill { display: none; } /* hide lowest-priority pill */
+  .map-legend { font-size: 9px; gap: 10px; }
+}
+@media (orientation: portrait) and (max-width: 820px) {
+  #windshield { flex: 1 1 64%; }
+  #dashboard { max-height: 42%; }
 }
 
 /* ============================================================
@@ -583,6 +602,7 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   .overlay-card { animation: none; }
   .overlay-best.new { animation: none; }
+  .map-scanline { display: none; } /* C5 */
 }
 
 /* --- Onboarding / status toast --- */
@@ -603,3 +623,102 @@ html, body {
   transition: opacity 0.3s ease, transform 0.3s ease;
 }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ============================================================
+   Overhaul: touch controls · focus · a11y themes · stats
+   ============================================================ */
+
+/* A8: stop pull-to-refresh / pinch during play */
+html, body { overscroll-behavior: none; }
+#cabin { touch-action: none; }
+
+/* C1: visible keyboard focus rings (none existed before) */
+.dash-btn:focus-visible, .icon-btn:focus-visible, .diff-btn:focus-visible,
+.big-btn:focus-visible, .text-btn:focus-visible, .speed-btn:focus-visible,
+.touch-btn:focus-visible, #wheel:focus-visible, .toggle input:focus-visible {
+  outline: 3px solid var(--neon-cyan);
+  outline-offset: 2px;
+}
+
+/* --- A1/A3: on-screen touch controls (hidden unless touch device) --- */
+/* Visibility is driven by the body.touch class set in JS (covers coarse
+   pointers and touch-capable devices). */
+#touch-controls { display: none; }
+body.touch #touch-controls {
+  display: flex;
+  position: absolute;
+  inset: auto 0 0 0;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 0 14px 14px;
+  z-index: 16;
+  pointer-events: none;
+}
+#touch-controls .touch-steer,
+#touch-controls .touch-actions { display: flex; gap: 10px; pointer-events: auto; }
+#touch-controls .touch-actions { flex-wrap: wrap; max-width: 50%; justify-content: flex-end; }
+.touch-btn {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  border: 1px solid rgba(47,243,255,0.5);
+  background: rgba(8,14,28,0.6);
+  color: #cfe8ff;
+  font-size: 22px; font-weight: 800;
+  font-family: inherit;
+  display: flex; align-items: center; justify-content: center;
+  touch-action: none;
+  -webkit-user-select: none; user-select: none;
+  box-shadow: 0 0 14px rgba(47,243,255,0.18);
+}
+.touch-btn:active { background: rgba(47,243,255,0.3); transform: scale(0.94); }
+.touch-btn.small { width: 50px; height: 50px; font-size: 16px; }
+.touch-btn.go {
+  width: 74px; height: 74px;
+  color: #04121a; border-color: var(--neon-green);
+  background: linear-gradient(180deg, var(--neon-green), #16b85e);
+  letter-spacing: 1px;
+}
+
+/* --- C8: lifetime stats panel + intro stats --- */
+#stats-overlay {
+  position: absolute; inset: 12px;
+  border-radius: 14px;
+  display: none;
+  align-items: center; justify-content: center;
+  background: radial-gradient(circle at 50% 40%, rgba(10,16,34,0.9), rgba(3,5,12,0.97));
+  z-index: 24; text-align: center; padding: 20px;
+}
+#stats-overlay.show { display: flex; }
+.intro-stats {
+  display: flex; justify-content: center; gap: 16px; flex-wrap: wrap;
+  margin: 6px 0 12px;
+  font-size: 11px; letter-spacing: 1px; color: var(--text-soft);
+}
+.intro-stats b { color: var(--neon-cyan); font-family: "Consolas", monospace; }
+.lifetime-row {
+  margin: 10px 0 4px;
+  font-size: 11px; letter-spacing: 1px; color: var(--text-soft);
+}
+
+/* --- C3: high-contrast theme --- */
+body.high-contrast {
+  --neon-cyan: #6ff7ff;
+  --neon-green: #79ffae;
+  --neon-amber: #ffd24a;
+  --neon-red: #ff6a7d;
+  --text-soft: #d6e6ff;
+}
+body.high-contrast .hud-pill,
+body.high-contrast #help-strip,
+body.high-contrast .icon-btn { background: rgba(2,6,14,0.92); }
+body.high-contrast .overlay-text,
+body.high-contrast .map-legend,
+body.high-contrast .hud-label { color: #e9f2ff; }
+
+/* --- C4: larger text --- */
+body.big-text .hud-label { font-size: 12px; }
+body.big-text .hud-value { font-size: 15px; }
+body.big-text .map-legend { font-size: 12px; }
+body.big-text .cluster-title { font-size: 13px; }
+body.big-text #help-strip { font-size: 13px; }
+body.big-text .toggle { font-size: 16px; }

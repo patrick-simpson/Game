@@ -1,0 +1,10 @@
+{
+  "name": "ultra-maze-driver",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ultra Maze Driver — client-side maze rescue driving game",
+  "scripts": {
+    "check": "node --check js/audio.js && node --check js/maze.js && node --check js/dashboard.js && node --check js/game.js",
+    "test": "node test/maze.test.js && node test/smoke.test.js"
+  }
+}

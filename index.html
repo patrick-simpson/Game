@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no, maximum-scale=1" />
   <title>Ultra Maze Driver &mdash; Mega Maze Rescue: Dashboard Simulator</title>
   <link rel="stylesheet" href="css/style.css" />
 </head>
@@ -12,16 +12,17 @@
     <!-- ===================== WINDSHIELD ===================== -->
     <section id="windshield">
       <div id="windshield-frame">
-        <canvas id="view" width="960" height="430"></canvas>
+        <canvas id="view" width="960" height="430" role="img" aria-label="Maze driving view"></canvas>
 
         <!-- Damage feedback flash (Improvement #10) -->
         <div id="damage-flash"></div>
 
         <!-- Top-right cabin controls (Improvement #20) -->
         <div id="topbar">
-          <button class="icon-btn" id="mute-btn" title="Mute (M)">&#128266;</button>
-          <button class="icon-btn" id="pause-btn" title="Pause (P)">&#10073;&#10073;</button>
-          <button class="icon-btn" id="help-btn" title="Help (H)">?</button>
+          <button class="icon-btn" id="mute-btn" title="Mute (M)" aria-label="Mute" aria-pressed="false">&#128266;</button>
+          <button class="icon-btn" id="pause-btn" title="Pause (P)" aria-label="Pause">&#10073;&#10073;</button>
+          <button class="icon-btn" id="stats-btn" title="Stats" aria-label="Lifetime stats">&#9733;</button>
+          <button class="icon-btn" id="help-btn" title="Help (H)" aria-label="Toggle help">?</button>
         </div>
 
         <!-- Heads-up overlays -->
@@ -49,14 +50,29 @@
               <span class="hud-label">SCORE</span>
               <span id="score-readout" class="hud-value">0</span>
             </div>
-            <div class="hud-pill">
+            <div class="hud-pill" id="dist-pill">
               <span class="hud-label">DISTANCE TO VIP</span>
               <span id="dist-readout" class="hud-value">--</span>
             </div>
             <div class="hud-pill warn" id="warn-pill">
-              <span class="hud-label">PEDESTRIAN HITS</span>
-              <span id="warn-readout" class="hud-value">0</span>
+              <span class="hud-label">PED HITS</span>
+              <span id="warn-readout" class="hud-value" aria-live="polite">0</span>
             </div>
+          </div>
+        </div>
+
+        <!-- On-screen touch controls (shown only on touch devices) -->
+        <div id="touch-controls" aria-hidden="false">
+          <div class="touch-steer">
+            <button id="steer-left" class="touch-btn" aria-label="Steer left">&#8656;</button>
+            <button id="steer-right" class="touch-btn" aria-label="Steer right">&#8658;</button>
+          </div>
+          <div class="touch-actions">
+            <button id="touch-laser" class="touch-btn small" aria-label="Fire laser">&#9650;</button>
+            <button id="touch-jump" class="touch-btn small" aria-label="Jump">&#10548;</button>
+            <button id="touch-boost" class="touch-btn small" aria-label="Boost">&#187;</button>
+            <button id="touch-reverse" class="touch-btn small" aria-label="Reverse">&#9660;</button>
+            <button id="touch-throttle" class="touch-btn go" aria-label="Throttle">GO</button>
           </div>
         </div>
 
@@ -64,7 +80,7 @@
         <div id="vip-beacon"><span class="beacon-arrow">&#10148;</span><span class="beacon-label">VIP</span></div>
 
         <!-- Onboarding / status toast -->
-        <div id="toast"></div>
+        <div id="toast" aria-live="polite" role="status"></div>
 
         <!-- Control hint strip (Improvement #19) -->
         <div id="help-strip">
@@ -102,6 +118,7 @@
             </div>
 
             <p class="overlay-best">BEST TIME: <span id="best-time">--</span></p>
+            <div id="intro-stats" class="intro-stats"></div>
             <button id="start-btn" class="big-btn">START ENGINE</button>
           </div>
         </div>
@@ -115,9 +132,22 @@
               <label class="toggle"><input type="checkbox" id="opt-shake" checked /> Screen shake</label>
               <label class="toggle"><input type="checkbox" id="opt-motion" /> Reduce motion</label>
               <label class="toggle"><input type="checkbox" id="opt-mute" /> Mute audio</label>
+              <label class="toggle"><input type="checkbox" id="opt-haptics" checked /> Vibration (mobile)</label>
+              <label class="toggle"><input type="checkbox" id="opt-contrast" /> High contrast + threat marks</label>
+              <label class="toggle"><input type="checkbox" id="opt-bigtext" /> Larger text</label>
             </div>
             <button id="resume-btn" class="big-btn">RESUME</button>
             <button id="quit-btn" class="text-btn">Quit to menu</button>
+          </div>
+        </div>
+
+        <!-- Lifetime stats panel (C8) -->
+        <div id="stats-overlay">
+          <div class="overlay-card">
+            <h1 class="overlay-title">LIFETIME STATS</h1>
+            <div id="stats-body" class="stat-grid"></div>
+            <button id="stats-close" class="big-btn">CLOSE</button>
+            <button id="stats-reset" class="text-btn">Reset stats</button>
           </div>
         </div>
       </div>
@@ -155,7 +185,7 @@
       <div class="dash-cluster" id="cluster-center">
         <div class="cluster-title">STEERING</div>
         <div id="wheel-housing">
-          <canvas id="wheel" width="220" height="220"></canvas>
+          <canvas id="wheel" width="220" height="220" role="img" aria-label="Steering wheel (use left/right arrow keys to steer)" tabindex="0"></canvas>
         </div>
         <div id="heading-readout">HEADING <span id="heading-val">N</span></div>
       </div>
@@ -163,7 +193,7 @@
       <div class="dash-cluster" id="cluster-right">
         <div class="cluster-title">TACTICAL MINI-MAP</div>
         <div id="map-housing">
-          <canvas id="minimap" width="190" height="190"></canvas>
+          <canvas id="minimap" width="190" height="190" role="img" aria-label="Tactical mini-map"></canvas>
           <div class="map-scanline"></div>
         </div>
         <div class="map-legend">

@@ -24,6 +24,8 @@ window.MMR = window.MMR || {};
       this.damageFlash = document.getElementById("damage-flash");
       this.helpStrip = document.getElementById("help-strip");
 
+      this.touch = document.getElementById("touch-controls");
+
       this.audio = new M.SoundEngine();
       this.dashboard = new M.Dashboard(this);
 
@@ -31,8 +33,16 @@ window.MMR = window.MMR || {};
       this.settings = this._loadSettings();
       this.audio.setMuted(this.settings.muted);
 
+      // lifetime stats (persisted)
+      this.stats = this._loadStats();
+
       this.dpr = 1;
       this.vw = 960; this.vh = 430;
+
+      // cached gradients / sprites (built in _resize / lazily) — see plan B1-B4
+      this._bgGrad = null; this._vignetteGrad = null;
+      this._wallTile = null; this._floorTile = null;
+      this._creatureSprite = null; this._driverSprite = null;
 
       this.world = null;
       this.car = { x: 0, y: 0, angle: -Math.PI / 2 };
@@ -68,21 +78,35 @@ window.MMR = window.MMR || {};
       this.introCardHTML = this.overlay.querySelector(".overlay-card").innerHTML;
 
       this._applySettingsToUI();
+      this._applyA11yClasses();
       this._bindKeys();
       this._bindUI();
+      this._bindTouchControls();
       this._wireIntro();
       this._resize();
       window.addEventListener("resize", () => this._resize());
+      // B7: auto-pause + silence engine when the tab is hidden
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+          this.audio.silenceEngine();
+          if (this.state === "playing") this.togglePause();
+        }
+      });
       this._showBest();
+      this._renderIntroStats();
 
       this.lastTime = performance.now();
+      this._acc = 0; // fixed-timestep accumulator (B8)
       requestAnimationFrame((t) => this._loop(t));
     }
 
     // ---------------- persistence / settings ----------------
     _loadSettings() {
       // Fix #1: stable north-up camera by default (rotateView off)
-      let s = { shake: true, reducedMotion: false, muted: false, rotateView: false };
+      let s = {
+        shake: true, reducedMotion: false, muted: false, rotateView: false,
+        haptics: true, highContrast: false, bigText: false
+      };
       try {
         const raw = localStorage.getItem("umd_settings");
         if (raw) s = Object.assign(s, JSON.parse(raw));
@@ -95,15 +119,68 @@ window.MMR = window.MMR || {};
     _saveSettings() {
       try { localStorage.setItem("umd_settings", JSON.stringify(this.settings)); } catch (e) { /* ignore */ }
     }
+
+    // ---------------- lifetime stats (C6) ----------------
+    _loadStats() {
+      let s = {
+        runs: 0, wins: 0, losses: 0, bestScore: 0,
+        totalKills: 0, totalCells: 0, totalPedHits: 0, totalTimeMs: 0,
+        byDiff: { EASY: 0, NORMAL: 0, HARD: 0 }
+      };
+      try {
+        const raw = localStorage.getItem("umd_stats");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          s = Object.assign(s, parsed);
+          s.byDiff = Object.assign({ EASY: 0, NORMAL: 0, HARD: 0 }, parsed.byDiff || {});
+        }
+      } catch (e) { /* ignore */ }
+      return s;
+    }
+    _saveStats() {
+      try { localStorage.setItem("umd_stats", JSON.stringify(this.stats)); } catch (e) { /* ignore */ }
+    }
+    resetStats() {
+      try { localStorage.removeItem("umd_stats"); } catch (e) { /* ignore */ }
+      this.stats = this._loadStats();
+      this._renderIntroStats();
+    }
+
+    // Apply accessibility theme classes to <body> (C3, C4)
+    _applyA11yClasses() {
+      const b = document.body;
+      if (!b) return;
+      b.classList.toggle("high-contrast", !!this.settings.highContrast);
+      b.classList.toggle("big-text", !!this.settings.bigText);
+    }
+
+    // C7/C10: inject lifetime stats into the intro card (which is restored
+    // from captured HTML, so values must be set dynamically).
+    _renderIntroStats() {
+      const el = document.getElementById("intro-stats");
+      if (!el) return;
+      const s = this.stats;
+      el.innerHTML =
+        `<span>RUNS <b>${s.runs}</b></span>` +
+        `<span>RESCUES <b>${s.wins}</b></span>` +
+        `<span>BEST SCORE <b>${s.bestScore}</b></span>`;
+    }
+
+    // A7: haptic feedback, gated by setting + device support
+    _haptic(pattern) {
+      if (this.settings.haptics && navigator.vibrate) {
+        try { navigator.vibrate(pattern); } catch (e) { /* ignore */ }
+      }
+    }
     _applySettingsToUI() {
-      const sh = document.getElementById("opt-shake");
-      const mo = document.getElementById("opt-motion");
-      const mu = document.getElementById("opt-mute");
-      const rv = document.getElementById("opt-rotate");
-      if (sh) sh.checked = this.settings.shake;
-      if (mo) mo.checked = this.settings.reducedMotion;
-      if (mu) mu.checked = this.settings.muted;
-      if (rv) rv.checked = this.settings.rotateView;
+      const set = (id, val) => { const el = document.getElementById(id); if (el) el.checked = val; };
+      set("opt-shake", this.settings.shake);
+      set("opt-motion", this.settings.reducedMotion);
+      set("opt-mute", this.settings.muted);
+      set("opt-rotate", this.settings.rotateView);
+      set("opt-haptics", this.settings.haptics);
+      set("opt-contrast", this.settings.highContrast);
+      set("opt-bigtext", this.settings.bigText);
       this._updateMuteIcon();
     }
     _bestKey() { return "umd_best_" + this.selectedDiff; }
@@ -125,6 +202,80 @@ window.MMR = window.MMR || {};
         cv.width = Math.round(rect.width * dpr);
         cv.height = Math.round(rect.height * dpr);
       }
+      this._buildViewGradients();
+      this._speedLines = null; // reseed against new dimensions (B5)
+    }
+
+    // B1/B2: cache the backdrop + vignette gradients (rebuilt only on resize)
+    _buildViewGradients() {
+      const ctx = this.ctx, W = this.vw, H = this.vh;
+      const bg = ctx.createLinearGradient(0, 0, 0, H);
+      bg.addColorStop(0, "#0a1830"); bg.addColorStop(1, "#040810");
+      this._bgGrad = bg;
+      const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.9);
+      vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.55)");
+      this._vignetteGrad = vg;
+    }
+
+    // B2: pre-render one wall + floor tile to offscreen canvases (once)
+    _buildTiles() {
+      const T = CFG.TILE;
+      // wall tile with faux-3D bevel
+      const wc = document.createElement("canvas");
+      wc.width = T; wc.height = T;
+      const w = wc.getContext("2d");
+      const g = w.createLinearGradient(0, 0, 0, T);
+      g.addColorStop(0, "#1b3a6b"); g.addColorStop(1, "#0e2348");
+      w.fillStyle = g; w.fillRect(0, 0, T, T);
+      // top/left highlight, bottom/right shadow → reads as raised
+      w.strokeStyle = "rgba(120,200,255,0.35)"; w.lineWidth = 2;
+      w.beginPath(); w.moveTo(1, T - 1); w.lineTo(1, 1); w.lineTo(T - 1, 1); w.stroke();
+      w.strokeStyle = "rgba(0,0,0,0.45)";
+      w.beginPath(); w.moveTo(T - 1, 1); w.lineTo(T - 1, T - 1); w.lineTo(1, T - 1); w.stroke();
+      w.strokeStyle = "rgba(47,243,255,0.5)"; w.lineWidth = 2;
+      w.strokeRect(1, 1, T - 2, T - 2);
+      w.strokeStyle = "rgba(120,200,255,0.18)"; w.lineWidth = 1;
+      w.strokeRect(5, 5, T - 10, T - 10);
+      this._wallTile = wc;
+
+      // floor tile
+      const fc = document.createElement("canvas");
+      fc.width = T; fc.height = T;
+      const f = fc.getContext("2d");
+      f.fillStyle = "#0c1626"; f.fillRect(0, 0, T, T);
+      f.strokeStyle = "rgba(47,243,255,0.06)"; f.lineWidth = 1;
+      f.strokeRect(0.5, 0.5, T - 1, T - 1);
+      this._floorTile = fc;
+    }
+
+    // B4: pre-render creature + driver sprites (glow baked in), drawn rotated
+    _buildSprites() {
+      // creature: spiky magenta blob
+      const cc = document.createElement("canvas"); cc.width = 40; cc.height = 40;
+      const c = cc.getContext("2d"); c.translate(20, 20);
+      c.fillStyle = "#ff2bd6"; c.shadowColor = "#ff2bd6"; c.shadowBlur = 10;
+      c.beginPath();
+      const spikes = 7, R = 13, r = 7;
+      for (let i = 0; i < spikes * 2; i++) {
+        const rad = i % 2 === 0 ? R : r, a = (i / (spikes * 2)) * Math.PI * 2;
+        const px = Math.cos(a) * rad, py = Math.sin(a) * rad;
+        i === 0 ? c.moveTo(px, py) : c.lineTo(px, py);
+      }
+      c.closePath(); c.fill(); c.shadowBlur = 0;
+      c.fillStyle = "#0a0010";
+      c.beginPath(); c.arc(-3, -1, 2, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.arc(3, -1, 2, 0, Math.PI * 2); c.fill();
+      this._creatureSprite = cc;
+
+      // driver: rogue red car (points "up", local -y)
+      const dc = document.createElement("canvas"); dc.width = 40; dc.height = 44;
+      const d = dc.getContext("2d"); d.translate(20, 22);
+      d.fillStyle = "#ff3b53"; d.strokeStyle = "#ffd6dc"; d.lineWidth = 1.5;
+      this._roundRect(d, -10, -15, 20, 30, 5); d.fill(); d.stroke();
+      d.fillStyle = "#2a0008"; this._roundRect(d, -7, -10, 14, 9, 3); d.fill();
+      d.fillStyle = "#ffd966"; d.beginPath();
+      d.arc(-6, -14, 2, 0, Math.PI * 2); d.arc(6, -14, 2, 0, Math.PI * 2); d.fill();
+      this._driverSprite = dc;
     }
 
     // ---------------- lifecycle ----------------
@@ -178,6 +329,7 @@ window.MMR = window.MMR || {};
       card.innerHTML = this.introCardHTML;
       this._wireIntro();
       this._showBest();
+      this._renderIntroStats();
       this._showOverlay();
     }
 
@@ -230,11 +382,13 @@ window.MMR = window.MMR || {};
       document.getElementById("resume-btn").addEventListener("click", () => this.togglePause());
       document.getElementById("quit-btn").addEventListener("click", () => this.quitToMenu());
 
-      const bind = (id, key) => {
+      const bind = (id, key, onChange) => {
         const el = document.getElementById(id);
+        if (!el) return;
         el.addEventListener("change", () => {
           this.settings[key] = el.checked;
           if (key === "muted") { this.audio.setMuted(el.checked); this._updateMuteIcon(); }
+          if (onChange) onChange();
           this._saveSettings();
         });
       };
@@ -242,17 +396,91 @@ window.MMR = window.MMR || {};
       bind("opt-motion", "reducedMotion");
       bind("opt-mute", "muted");
       bind("opt-rotate", "rotateView");
+      bind("opt-haptics", "haptics");
+      bind("opt-contrast", "highContrast", () => this._applyA11yClasses());
+      bind("opt-bigtext", "bigText", () => this._applyA11yClasses());
 
-      // Fix #6: reverse button (press-and-hold)
-      const rev = document.getElementById("reverse-btn");
-      if (rev) {
-        const on = (e) => { this.keyReverse = true; e.preventDefault(); };
-        const off = () => { this.keyReverse = false; };
-        rev.addEventListener("mousedown", on);
-        rev.addEventListener("touchstart", on, { passive: false });
-        window.addEventListener("mouseup", off);
-        window.addEventListener("touchend", off);
+      // Stats panel (C8)
+      const statsBtn = document.getElementById("stats-btn");
+      if (statsBtn) statsBtn.addEventListener("click", () => this.showStats());
+      const statsClose = document.getElementById("stats-close");
+      if (statsClose) statsClose.addEventListener("click", () => this.hideStats());
+      const statsReset = document.getElementById("stats-reset");
+      if (statsReset) statsReset.addEventListener("click", () => { this.resetStats(); this.showStats(); });
+
+      // Fix #6: reverse button (press-and-hold) via the shared touch helper
+      this._touchPress(document.getElementById("reverse-btn"),
+        () => { this.keyReverse = true; }, () => { this.keyReverse = false; });
+    }
+
+    // ---------------- touch controls (A1-A3) ----------------
+    // Pointer Events helper: `on` fires on press, `off` on release/cancel.
+    _touchPress(el, on, off) {
+      if (!el) return;
+      const down = (e) => { on(); e.preventDefault(); };
+      const up = () => off();
+      if (window.PointerEvent) {
+        el.addEventListener("pointerdown", down);
+        el.addEventListener("pointerup", up);
+        el.addEventListener("pointercancel", up);
+        el.addEventListener("pointerleave", up);
+      } else {
+        el.addEventListener("mousedown", down);
+        el.addEventListener("touchstart", down, { passive: false });
+        window.addEventListener("mouseup", up);
+        window.addEventListener("touchend", up);
       }
+    }
+    _touchTap(el, fn) {
+      if (!el) return;
+      const h = (e) => { fn(); e.preventDefault(); };
+      if (window.PointerEvent) el.addEventListener("pointerdown", h);
+      else { el.addEventListener("mousedown", h); el.addEventListener("touchstart", h, { passive: false }); }
+    }
+
+    _bindTouchControls() {
+      this.isTouch = (window.matchMedia && window.matchMedia("(pointer: coarse)").matches)
+        || ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
+      if (document.body) document.body.classList.toggle("touch", !!this.isTouch);
+
+      this._touchPress(document.getElementById("steer-left"),
+        () => { this.keyLeft = true; }, () => { this.keyLeft = false; });
+      this._touchPress(document.getElementById("steer-right"),
+        () => { this.keyRight = true; }, () => { this.keyRight = false; });
+      this._touchPress(document.getElementById("touch-reverse"),
+        () => { this.keyReverse = true; }, () => { this.keyReverse = false; });
+      this._touchPress(document.getElementById("touch-boost"),
+        () => { this.keyBoost = true; }, () => { this.keyBoost = false; });
+      // hold-to-GO throttle
+      this._touchPress(document.getElementById("touch-throttle"),
+        () => this.setSpeedMode("GO"), () => this.setSpeedMode("STOP"));
+      this._touchTap(document.getElementById("touch-laser"), () => this.fireLaser());
+      this._touchTap(document.getElementById("touch-jump"), () => this.doJump());
+    }
+
+    showStats() {
+      const ov = document.getElementById("stats-overlay");
+      if (!ov) return;
+      const body = document.getElementById("stats-body");
+      if (body) {
+        const s = this.stats;
+        const fmt = this.dashboard._fmtTime(s.totalTimeMs || 0);
+        body.innerHTML = `
+          <div><span>RUNS</span><b>${s.runs}</b></div>
+          <div><span>RESCUES</span><b>${s.wins}</b></div>
+          <div><span>WIPEOUTS</span><b>${s.losses}</b></div>
+          <div><span>BEST SCORE</span><b>${s.bestScore}</b></div>
+          <div><span>THREATS DOWN</span><b>${s.totalKills}</b></div>
+          <div><span>CELLS</span><b>${s.totalCells}</b></div>
+          <div><span>PED. HITS</span><b>${s.totalPedHits}</b></div>
+          <div><span>PLAYTIME</span><b>${fmt}</b></div>
+          <div><span>EASY/NORM/HARD</span><b>${s.byDiff.EASY}/${s.byDiff.NORMAL}/${s.byDiff.HARD}</b></div>`;
+      }
+      ov.classList.add("show");
+    }
+    hideStats() {
+      const ov = document.getElementById("stats-overlay");
+      if (ov) ov.classList.remove("show");
     }
 
     _wireIntro() {
@@ -275,7 +503,11 @@ window.MMR = window.MMR || {};
     }
     _updateMuteIcon() {
       const b = document.getElementById("mute-btn");
-      if (b) b.innerHTML = this.settings.muted ? "&#128263;" : "&#128266;";
+      if (b) {
+        b.innerHTML = this.settings.muted ? "&#128263;" : "&#128266;";
+        b.setAttribute("aria-pressed", String(this.settings.muted));
+        b.setAttribute("aria-label", this.settings.muted ? "Unmute" : "Mute");
+      }
     }
     _toggleHelp() { this.helpStrip.classList.toggle("hidden"); }
 
@@ -297,6 +529,7 @@ window.MMR = window.MMR || {};
       this.laser.cooldown = CFG.LASER_COOLDOWN;
       this.dashboard.flashLaser();
       this.audio.laser();
+      this._haptic(12);
 
       const a = this.car.angle, dx = Math.cos(a), dy = Math.sin(a);
       let len = CFG.LASER_RANGE;
@@ -326,6 +559,7 @@ window.MMR = window.MMR || {};
       this.jump.cooldown = CFG.JUMP_COOLDOWN;
       this.dashboard.flashJump();
       this.audio.jump();
+      this._haptic(20);
     }
 
     boostBurst() {
@@ -333,6 +567,7 @@ window.MMR = window.MMR || {};
       this.boost.burst = 48;
       this.dashboard.flashBoost();
       this.audio.boost();
+      this._haptic(15);
     }
 
     // ---------------- particles ----------------
@@ -466,6 +701,7 @@ window.MMR = window.MMR || {};
       this.regenTimer = 0; // Fix #5: pause regen after taking a hit
       this._addShake(10);
       this.flashLevel = 1; // red damage flash (Improvement #10)
+      this._haptic([30, 20, 30]);
     }
 
     // Fix #14: push the car away from whatever it hit so you don't get
@@ -510,6 +746,7 @@ window.MMR = window.MMR || {};
           p.taken = true; this.cells++;
           this.shield = Math.min(CFG.SHIELD_MAX, this.shield + CFG.SHIELD_PICKUP);
           this.audio.pickup();
+          this._haptic([10, 30, 10]);
           this._spawnSparkle(p.x, p.y, "#39ff88");
         }
       }
@@ -564,6 +801,8 @@ window.MMR = window.MMR || {};
       const prev = Number(localStorage.getItem(this._bestKey()) || 0);
       const newBest = (!prev || this.elapsedMs < prev);
       if (newBest) { try { localStorage.setItem(this._bestKey(), String(Math.round(this.elapsedMs))); } catch (e) { /**/ } }
+      this._recordStats(true);
+      this._haptic([40, 40, 80]);
       this._seedFireworks();
       this._renderEndCard(true, newBest);
     }
@@ -574,7 +813,23 @@ window.MMR = window.MMR || {};
       this.audio.silenceEngine();
       this.audio.gameover();
       this.finalScore = this.score;
+      this._recordStats(false);
+      this._haptic([80, 40, 80]);
       this._renderEndCard(false, false);
+    }
+
+    // C6: fold this run into lifetime stats and persist
+    _recordStats(won) {
+      const s = this.stats;
+      s.runs++;
+      if (won) { s.wins++; s.byDiff[this.selectedDiff] = (s.byDiff[this.selectedDiff] || 0) + 1; }
+      else s.losses++;
+      s.bestScore = Math.max(s.bestScore, this.finalScore);
+      s.totalKills += this.kills;
+      s.totalCells += this.cells;
+      s.totalPedHits += this.pedestrianHits;
+      s.totalTimeMs += Math.round(this.elapsedMs);
+      this._saveStats();
     }
 
     _renderEndCard(won, newBest) {
@@ -593,6 +848,7 @@ window.MMR = window.MMR || {};
             <div><span>PED. HITS</span><b>${this.pedestrianHits}</b></div>
           </div>
           ${newBest ? '<p class="overlay-best new">NEW BEST TIME!</p>' : ""}
+          ${this._lifetimeRow()}
           <button id="again-btn" class="big-btn">PLAY AGAIN</button>
           <button id="menu-btn" class="text-btn">Change difficulty</button>`;
       } else {
@@ -606,6 +862,7 @@ window.MMR = window.MMR || {};
             <div><span>PED. HITS</span><b>${this.pedestrianHits}</b></div>
           </div>
           <p class="overlay-text">The rescue target is still out there. Try a new route.</p>
+          ${this._lifetimeRow()}
           <button id="again-btn" class="big-btn">TRY AGAIN</button>
           <button id="menu-btn" class="text-btn">Change difficulty</button>`;
       }
@@ -614,6 +871,12 @@ window.MMR = window.MMR || {};
       const menu = document.getElementById("menu-btn");
       if (again) again.addEventListener("click", () => this.startNew());
       if (menu) menu.addEventListener("click", () => this.quitToMenu());
+    }
+
+    // C7/C11: compact lifetime line under the per-run stats
+    _lifetimeRow() {
+      const s = this.stats;
+      return `<p class="lifetime-row">LIFETIME &middot; ${s.runs} runs &middot; ${s.wins} rescues &middot; best ${s.bestScore}</p>`;
     }
 
     // ---------------- win fireworks (Improvement #18) ----------------
@@ -652,10 +915,23 @@ window.MMR = window.MMR || {};
     }
 
     // ---------------- loop ----------------
+    // B8: fixed-timestep simulation so cooldowns / decay / boost feel the same
+    // on 60 / 120 / 144Hz displays; rendering still runs once per frame.
     _loop(t) {
-      const dt = Math.min(50, t - this.lastTime);
+      // clamp to [0,100ms]: guards against tab-switch gaps and any
+      // non-monotonic / backwards clock readings
+      const frame = Math.max(0, Math.min(100, t - this.lastTime));
       this.lastTime = t;
-      this._update(dt);
+      const STEP = 1000 / 60;
+      this._acc += frame;
+      let ticks = 0;
+      while (this._acc >= STEP && ticks < 5) {
+        this._update(STEP);
+        this._acc -= STEP;
+        ticks++;
+      }
+      if (ticks === 5) this._acc = 0; // avoid spiral of death
+
       this._render();
       this.dashboard.drawWheel(this.steer);
       if (this.world) this.dashboard.drawMinimap(this.world, this.car, this.explored);
@@ -675,9 +951,8 @@ window.MMR = window.MMR || {};
       const W = this.vw, H = this.vh;
       ctx.clearRect(0, 0, W, H);
 
-      const bg = ctx.createLinearGradient(0, 0, 0, H);
-      bg.addColorStop(0, "#0a1830"); bg.addColorStop(1, "#040810");
-      ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+      if (!this._bgGrad) this._buildViewGradients();
+      ctx.fillStyle = this._bgGrad; ctx.fillRect(0, 0, W, H);
 
       if (!this.world) { this._renderIdle(ctx, W, H); return; }
 
@@ -735,9 +1010,8 @@ window.MMR = window.MMR || {};
         this._renderSpeedLines(ctx, cx, cy);
       }
 
-      const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.9);
-      vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.55)");
-      ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+      if (!this._vignetteGrad) this._buildViewGradients();
+      ctx.fillStyle = this._vignetteGrad; ctx.fillRect(0, 0, W, H);
     }
 
     _renderIdle(ctx, W, H) {
@@ -791,20 +1065,15 @@ window.MMR = window.MMR || {};
       ctx.globalAlpha = 1;
     }
 
+    // B2: blit cached tiles instead of re-creating a gradient per tile
     _drawFloor(ctx, x, y, T) {
-      ctx.fillStyle = "#0c1626"; ctx.fillRect(x, y, T, T);
-      ctx.strokeStyle = "rgba(47,243,255,0.06)"; ctx.lineWidth = 1;
-      ctx.strokeRect(x + 0.5, y + 0.5, T - 1, T - 1);
+      if (!this._floorTile) this._buildTiles();
+      ctx.drawImage(this._floorTile, x, y);
     }
 
     _drawWall(ctx, x, y, T) {
-      const g = ctx.createLinearGradient(x, y, x, y + T);
-      g.addColorStop(0, "#1b3a6b"); g.addColorStop(1, "#0e2348");
-      ctx.fillStyle = g; ctx.fillRect(x, y, T, T);
-      ctx.strokeStyle = "rgba(47,243,255,0.5)"; ctx.lineWidth = 2;
-      ctx.strokeRect(x + 1, y + 1, T - 2, T - 2);
-      ctx.strokeStyle = "rgba(120,200,255,0.18)"; ctx.lineWidth = 1;
-      ctx.strokeRect(x + 5, y + 5, T - 10, T - 10);
+      if (!this._wallTile) this._buildTiles();
+      ctx.drawImage(this._wallTile, x, y);
     }
 
     _drawObstacle(ctx, x, y, type) {
@@ -862,30 +1131,31 @@ window.MMR = window.MMR || {};
       ctx.restore();
     }
 
+    // B4: blit pre-rendered sprites (glow baked in); C5: glyph cue for threats
     _drawCreature(ctx, e) {
+      if (!this._creatureSprite) this._buildSprites();
       ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(e.wobble * 0.3);
-      ctx.fillStyle = "#ff2bd6"; ctx.shadowColor = "#ff2bd6"; ctx.shadowBlur = 10;
-      ctx.beginPath();
-      const spikes = 7, R = 13, r = 7;
-      for (let i = 0; i < spikes * 2; i++) {
-        const rad = i % 2 === 0 ? R : r, a = (i / (spikes * 2)) * Math.PI * 2;
-        const px = Math.cos(a) * rad, py = Math.sin(a) * rad;
-        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-      }
-      ctx.closePath(); ctx.fill(); ctx.shadowBlur = 0;
-      ctx.fillStyle = "#0a0010";
-      ctx.beginPath(); ctx.arc(-3, -1, 2, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(3, -1, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.drawImage(this._creatureSprite, -20, -20);
       ctx.restore();
+      if (this.settings.highContrast) this._threatGlyph(ctx, e.x, e.y);
     }
 
     _drawDriver(ctx, e) {
+      if (!this._driverSprite) this._buildSprites();
       ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(Math.atan2(e.vy, e.vx) + Math.PI / 2);
-      ctx.fillStyle = "#ff3b53"; ctx.strokeStyle = "#ffd6dc"; ctx.lineWidth = 1.5;
-      this._roundRect(ctx, -10, -15, 20, 30, 5); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = "#2a0008"; this._roundRect(ctx, -7, -10, 14, 9, 3); ctx.fill();
-      ctx.fillStyle = "#ffd966"; ctx.beginPath();
-      ctx.arc(-6, -14, 2, 0, Math.PI * 2); ctx.arc(6, -14, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.drawImage(this._driverSprite, -20, -22);
+      ctx.restore();
+      if (this.settings.highContrast) this._threatGlyph(ctx, e.x, e.y);
+    }
+
+    // Colorblind-safe "danger" marker, hue-independent
+    _threatGlyph(ctx, x, y) {
+      ctx.save();
+      ctx.translate(x, y - 20);
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(-4, -4); ctx.lineTo(4, 4); ctx.moveTo(4, -4); ctx.lineTo(-4, 4);
+      ctx.stroke();
       ctx.restore();
     }
 
@@ -913,19 +1183,34 @@ window.MMR = window.MMR || {};
       ctx.restore();
     }
 
+    // B5: persistent streaming speed lines (no per-frame random jitter)
     _renderSpeedLines(ctx, cx, cy) {
+      const maxR = Math.hypot(this.vw, this.vh) * 0.5;
+      if (!this._speedLines) {
+        this._speedLines = [];
+        for (let i = 0; i < 14; i++) {
+          const a = (i / 14) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
+          this._speedLines.push({
+            a, r: 40 + Math.random() * maxR, len: 26 + Math.random() * 26,
+            alpha: 0.12 + Math.random() * 0.28
+          });
+        }
+      }
+      const spd = (this.boost.active ? 18 : 11);
       ctx.save();
-      ctx.strokeStyle = "rgba(180,230,255,0.25)";
+      ctx.strokeStyle = "rgba(180,230,255,1)";
       ctx.lineWidth = 2;
-      for (let i = 0; i < 10; i++) {
-        const a = Math.random() * Math.PI * 2;
-        const r0 = 60 + Math.random() * 40, r1 = r0 + 30 + Math.random() * 40;
-        ctx.globalAlpha = Math.random() * 0.5;
+      for (const L of this._speedLines) {
+        L.r += spd;
+        if (L.r > maxR) { L.r = 30 + Math.random() * 30; L.a = Math.random() * Math.PI * 2; }
+        ctx.globalAlpha = L.alpha;
+        const c = Math.cos(L.a), s = Math.sin(L.a);
         ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
-        ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+        ctx.moveTo(cx + c * L.r, cy + s * L.r);
+        ctx.lineTo(cx + c * (L.r + L.len), cy + s * (L.r + L.len));
         ctx.stroke();
       }
+      ctx.globalAlpha = 1;
       ctx.restore();
     }
 
@@ -952,9 +1237,12 @@ window.MMR = window.MMR || {};
         ctx.shadowBlur = 0;
       }
 
-      const grad = ctx.createLinearGradient(-16, 0, 16, 0);
-      grad.addColorStop(0, "#1f6fb0"); grad.addColorStop(0.5, "#3ad0ff"); grad.addColorStop(1, "#1f6fb0");
-      ctx.fillStyle = grad; ctx.strokeStyle = "#eafcff"; ctx.lineWidth = 2;
+      if (!this._carGrad) {
+        const g = ctx.createLinearGradient(-16, 0, 16, 0);
+        g.addColorStop(0, "#1f6fb0"); g.addColorStop(0.5, "#3ad0ff"); g.addColorStop(1, "#1f6fb0");
+        this._carGrad = g;
+      }
+      ctx.fillStyle = this._carGrad; ctx.strokeStyle = "#eafcff"; ctx.lineWidth = 2;
       this._roundRect(ctx, -15, -22, 30, 44, 8); ctx.fill(); ctx.stroke();
       ctx.fillStyle = "#04263a"; this._roundRect(ctx, -10, -16, 20, 12, 4); ctx.fill();
       ctx.fillStyle = "rgba(255,255,255,0.18)"; this._roundRect(ctx, -3, -20, 6, 40, 3); ctx.fill();

@@ -45,8 +45,28 @@ window.MMR = window.MMR || {};
       this._grabSteer = 0;
       this._blink = 0;
 
+      this._buildGradients();
       this._wireButtons();
       this._wireWheel();
+    }
+
+    // B3: build the wheel + minimap-cone gradients once (canvases are fixed size)
+    _buildGradients() {
+      const wc = this.wctx, R = 92;
+      const rg = wc.createLinearGradient(-R, -R, R, R);
+      rg.addColorStop(0, "#3df0ff"); rg.addColorStop(0.5, "#1b9fd8"); rg.addColorStop(1, "#2ff3ff");
+      this._wheelRimGrad = rg;
+      const hub = wc.createRadialGradient(0, -6, 4, 0, 0, 34);
+      hub.addColorStop(0, "#39507e"); hub.addColorStop(1, "#0c1426");
+      this._wheelHubGrad = hub;
+
+      const cone = this.mctx.createLinearGradient(0, 0, 26, 0);
+      cone.addColorStop(0, "rgba(47,243,255,0.35)");
+      cone.addColorStop(1, "rgba(47,243,255,0)");
+      this._coneGrad = cone;
+
+      this._vipSectorGrad = null; // built per-world in drawMinimap
+      this._lastWorld = null;
     }
 
     _wireButtons() {
@@ -168,9 +188,7 @@ window.MMR = window.MMR || {};
       ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.stroke();
 
       ctx.lineWidth = 10;
-      const rg = ctx.createLinearGradient(-R, -R, R, R);
-      rg.addColorStop(0, "#3df0ff"); rg.addColorStop(0.5, "#1b9fd8"); rg.addColorStop(1, "#2ff3ff");
-      ctx.strokeStyle = rg; ctx.shadowColor = "rgba(47,243,255,0.7)"; ctx.shadowBlur = 14;
+      ctx.strokeStyle = this._wheelRimGrad; ctx.shadowColor = "rgba(47,243,255,0.7)"; ctx.shadowBlur = 14;
       ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.stroke();
       ctx.shadowBlur = 0;
 
@@ -188,9 +206,7 @@ window.MMR = window.MMR || {};
       ctx.beginPath(); ctx.moveTo(0, -R - 2); ctx.lineTo(-8, -R + 14); ctx.lineTo(8, -R + 14);
       ctx.closePath(); ctx.fill(); ctx.restore();
 
-      const hub = ctx.createRadialGradient(0, -6, 4, 0, 0, 34);
-      hub.addColorStop(0, "#39507e"); hub.addColorStop(1, "#0c1426");
-      ctx.fillStyle = hub; ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = this._wheelHubGrad; ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = "#3df0ff"; ctx.lineWidth = 2; ctx.stroke();
       ctx.fillStyle = "#2ff3ff"; ctx.font = "bold 13px Consolas, monospace";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -207,6 +223,20 @@ window.MMR = window.MMR || {};
       ctx.fillStyle = "#021410"; ctx.fillRect(0, 0, w, h);
 
       const sx = w / world.gw, sy = h / world.gh;
+
+      // B3: (re)build the per-world VIP sector gradient only when the world changes
+      if (world !== this._lastWorld) {
+        this._lastWorld = world;
+        this._vipSectorGrad = null;
+        if (world.diff && world.diff.reveal && world.vip) {
+          const vx = (world.vip.x / world.pixelW) * w;
+          const vy = (world.vip.y / world.pixelH) * h;
+          const g = ctx.createRadialGradient(vx, vy, 2, vx, vy, w * 0.22);
+          g.addColorStop(0, "rgba(255,215,80,0.28)");
+          g.addColorStop(1, "rgba(255,215,80,0)");
+          this._vipSectorGrad = { grad: g, vx, vy, r: w * 0.22 };
+        }
+      }
 
       // explored breadcrumb glow (Improvement #16)
       if (explored && explored.size) {
@@ -231,14 +261,10 @@ window.MMR = window.MMR || {};
 
       // Fix #18: on EASY, paint a soft "sector" glow over the VIP's general
       // area — enough to steer toward, never enough to pinpoint the tile.
-      if (world.diff && world.diff.reveal && world.vip) {
-        const vx = (world.vip.x / world.pixelW) * w;
-        const vy = (world.vip.y / world.pixelH) * h;
-        const g = ctx.createRadialGradient(vx, vy, 2, vx, vy, w * 0.22);
-        g.addColorStop(0, "rgba(255,215,80,0.28)");
-        g.addColorStop(1, "rgba(255,215,80,0)");
-        ctx.fillStyle = g;
-        ctx.beginPath(); ctx.arc(vx, vy, w * 0.22, 0, Math.PI * 2); ctx.fill();
+      if (this._vipSectorGrad) {
+        const vs = this._vipSectorGrad;
+        ctx.fillStyle = vs.grad;
+        ctx.beginPath(); ctx.arc(vs.vx, vs.vy, vs.r, 0, Math.PI * 2); ctx.fill();
       }
 
       // shield pickups
@@ -264,10 +290,7 @@ window.MMR = window.MMR || {};
       ctx.save();
       ctx.translate(px, py);
       ctx.rotate(car.angle);
-      const cone = ctx.createLinearGradient(0, 0, 26, 0);
-      cone.addColorStop(0, "rgba(47,243,255,0.35)");
-      cone.addColorStop(1, "rgba(47,243,255,0)");
-      ctx.fillStyle = cone;
+      ctx.fillStyle = this._coneGrad;
       ctx.beginPath(); ctx.moveTo(0, 0);
       ctx.arc(0, 0, 26, -0.5, 0.5); ctx.closePath(); ctx.fill();
       ctx.restore();

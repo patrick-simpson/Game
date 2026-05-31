@@ -27,7 +27,13 @@ No backend or build step is required.
 | Pause / Settings | `P` / `Esc` | **❚❚** button |
 | Mute | `M` | **🔊** button |
 | Toggle help strip | `H` | **?** button |
+| Lifetime stats | — | **★** button |
 | Restart | `Enter` | **Play Again** |
+
+On phones/tablets, on-screen **steer pads** and **GO / laser / jump / boost /
+reverse** buttons appear automatically over the windshield; the wheel and
+mini-map scale to the screen and the dashboard reflows for small/portrait
+layouts.
 
 ### Goal
 
@@ -59,8 +65,13 @@ the VIP without revealing the exact tile.
 - Three difficulty presets with smarter, lightly homing enemy drivers.
 - Nitro boost, shield pickups, scoring, mission timer, and a saved best time.
 - Exhaust trails, speed lines, pixel explosions, damage flash, and win fireworks.
-- Pause menu with accessibility toggles (screen shake, reduced motion, mute),
-  high-DPI rendering, and a viewport-aware tactical mini-map.
+- Pause menu with accessibility toggles: screen shake, reduced motion, mute,
+  **high contrast + threat marks**, **larger text**, and **mobile vibration**.
+- Full **touch controls** + responsive layout for phones and tablets.
+- **Lifetime stats** (runs, rescues, best score, kills, cells, playtime) saved
+  locally and shown on the intro and end screens, with a reset option.
+- Performance-tuned rendering (cached gradients + pre-rendered wall/sprite tiles,
+  fixed-timestep simulation) and high-DPI canvases.
 
 ## Project structure
 
@@ -71,6 +82,17 @@ js/audio.js       Procedural Web Audio sound engine
 js/maze.js        Maze generation, obstacles, drivers, creatures, pickups, VIP
 js/dashboard.js   Steering wheel, buttons, cooldown meters, mini-map, HUD
 js/game.js        Main loop, state, physics, particles, scoring, win/lose
+test/             Headless Node tests (maze reachability + game smoke test)
+package.json      `npm run check` (syntax) and `npm test` (test suite)
+```
+
+## Tests
+
+No build step is required to play. To run the headless checks:
+
+```
+npm run check   # node --check on all four JS modules
+npm test        # maze reachability + DOM/Canvas-mocked game smoke test
 ```
 
 ## Deploy to GitHub Pages
