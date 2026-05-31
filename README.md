@@ -59,6 +59,10 @@ when you avoid damage, crashing only bumps you (it never force-stops the car),
 pedestrians dodge out of your way, and an always-on **compass** points toward
 the VIP without revealing the exact tile.
 
+Mazes are carved with a **straight-corridor bias** so passages run long between
+turns (strongest on Easy) and extra connecting openings remove most dead-ends,
+making routes much easier to read and drive. Harder difficulties twist more.
+
 ## Highlights
 
 - Procedural Web Audio engine (no sound files) with a dynamic engine hum.

@@ -38,10 +38,13 @@ window.MMR = window.MMR || {};
 
   // ---- Difficulty presets (rebalanced for playability) ----
   // Fix #9, #10, #14, #15, #19: gentler enemies, smaller mazes, more pickups.
+  // `straight` biases the carver to keep going in the same direction so
+  // corridors run long between turns; `loops` is the fraction of extra wall
+  // openings punched in to remove dead-ends (higher = easier to navigate).
   const DIFFICULTY = {
-    EASY:   { cols: 9,  rows: 9,  pedestrians: 4, creatures: 2, drivers: 2, obstacles: 5,  pickups: 5, enemyScale: 0.7,  homing: 0.0,  reveal: true  },
-    NORMAL: { cols: 12, rows: 12, pedestrians: 6, creatures: 4, drivers: 3, obstacles: 8,  pickups: 4, enemyScale: 0.9,  homing: 0.15, reveal: false },
-    HARD:   { cols: 15, rows: 15, pedestrians: 8, creatures: 6, drivers: 5, obstacles: 12, pickups: 3, enemyScale: 1.15, homing: 0.4,  reveal: false }
+    EASY:   { cols: 9,  rows: 9,  pedestrians: 4, creatures: 2, drivers: 2, obstacles: 5,  pickups: 5, enemyScale: 0.7,  homing: 0.0,  reveal: true,  straight: 0.85, loops: 0.16 },
+    NORMAL: { cols: 12, rows: 12, pedestrians: 6, creatures: 4, drivers: 3, obstacles: 8,  pickups: 4, enemyScale: 0.9,  homing: 0.15, reveal: false, straight: 0.72, loops: 0.12 },
+    HARD:   { cols: 15, rows: 15, pedestrians: 8, creatures: 6, drivers: 5, obstacles: 12, pickups: 3, enemyScale: 1.15, homing: 0.4,  reveal: false, straight: 0.58, loops: 0.09 }
   };
   M.DIFFICULTY = DIFFICULTY;
 
@@ -99,6 +102,8 @@ window.MMR = window.MMR || {};
       stack.push([cx, cy]);
 
       const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+      const straight = this.diff.straight !== undefined ? this.diff.straight : 0.7;
+      let lastDir = null; // direction of the most recent carve
       while (stack.length) {
         [cx, cy] = stack[stack.length - 1];
         const opts = [];
@@ -108,16 +113,24 @@ window.MMR = window.MMR || {};
             opts.push([nx, ny, dx, dy]);
           }
         }
-        if (!opts.length) { stack.pop(); continue; }
-        const [nx, ny, dx, dy] = U.pick(opts);
+        if (!opts.length) { stack.pop(); lastDir = null; continue; }
+        // Straight bias: keep heading the same way when possible so corridors
+        // run long between turns; otherwise pick a random new direction.
+        let choice = null;
+        if (lastDir && Math.random() < straight) {
+          choice = opts.find((o) => o[2] === lastDir[0] && o[3] === lastDir[1]) || null;
+        }
+        if (!choice) choice = U.pick(opts);
+        const [nx, ny, dx, dy] = choice;
         const [cgx, cgy] = cellToGrid(cx, cy);
         this.grid[cgy + dy][cgx + dx] = 0;
         this.grid[cgy + dy * 2][cgx + dx * 2] = 0;
         visited[ny][nx] = true;
+        lastDir = [dx, dy];
         stack.push([nx, ny]);
       }
 
-      const extra = Math.floor((this.cols * this.rows) * 0.08);
+      const extra = Math.floor((this.cols * this.rows) * (this.diff.loops !== undefined ? this.diff.loops : 0.08));
       for (let i = 0; i < extra; i++) {
         const wx = 1 + U.rand(this.gw - 2);
         const wy = 1 + U.rand(this.gh - 2);
