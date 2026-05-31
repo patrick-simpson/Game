@@ -712,6 +712,34 @@ body.touch #touch-controls {
   font-size: 11px; letter-spacing: 1px; color: var(--text-soft);
 }
 
+/* --- How-to-play panel on the start screen (E4) --- */
+.howto {
+  margin: 12px auto 4px;
+  max-width: 460px;
+  text-align: left;
+  background: rgba(8, 24, 12, 0.55);
+  border: 1px solid rgba(57, 255, 136, 0.35);
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+.howto-title {
+  margin: 0 0 6px;
+  color: var(--neon-green);
+  letter-spacing: 2px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.howto-list {
+  margin: 0; padding-left: 18px;
+  color: var(--text-soft);
+  font-size: 12.5px; line-height: 1.55;
+}
+.howto-list b { color: #eafff2; }
+@media (max-width: 620px) {
+  .howto-list { font-size: 11px; }
+  .howto { padding: 8px 10px; }
+}
+
 /* --- C3: high-contrast theme --- */
 body.high-contrast {
   --neon-cyan: #6ff7ff;

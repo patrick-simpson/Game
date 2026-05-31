@@ -1,12 +1,14 @@
-# Ultra Maze Driver — Mega Maze Rescue: Dashboard Simulator
+# Ultra Maze Driver — Jungle Rescue: First-Person Drive
 
-A fully client-side arcade rescue game. You sit inside a high-tech spy car: the
-**windshield** (HTML5 Canvas) shows a scrolling driving view of a giant
-containment-zone maze, while the **dashboard** below gives you a working
+A fully client-side arcade rescue game. You sit **inside** a high-tech spy car:
+the **windshield** (HTML5 Canvas) renders a first-person, pseudo-3D drive down a
+jungle corridor (a raycaster), while the **dashboard** below gives you a working
 steering wheel, speed controls, a laser, a jump rocket, and a tactical mini-map.
 
-Find the **VIP** hidden deep in the maze and drive up to them to win — while
-dodging walls, rogue drivers, dangerous creatures, and innocent pedestrians.
+Follow the path and take the **right turns** to reach the lost **VIP** — dodging
+aggressive rogue cars, hulking monsters, and innocent jungle explorers. Walls are
+harmless (you just bump and slide); the one thing that ends a run is driving off a
+wrong turn into the **void**, which sends you back to the start to try again.
 
 ## Play
 
@@ -37,45 +39,51 @@ layouts.
 
 ### Goal
 
-- Pick a **difficulty** (Easy / Normal / Hard), then navigate the procedurally
-  generated maze using your eyes, the mini-map, and the proximity beacon.
-- **Laser** destroys rogue drivers and dangerous creatures (never pedestrians).
-- **Jump Rocket** glides the car over small obstacles (blocks & rails).
+- Pick a **difficulty** (Easy / Normal / Hard), then drive the corridor toward
+  the **VIP**, using your eyes, the mini-map, and the directional compass.
+- The route is **mostly straight with a few decision turns**. Take the right
+  turns to reach the VIP; wrong turns **loop back** to the path.
+- **Do not drive into the VOID.** Wrong openings drop away into a dark pit — fall
+  in and you simply **start over** at the beginning of the same run. (There is no
+  shield and no health: walls are harmless, they just stop you.)
+- **Laser** destroys rogue cars and monsters (never the human explorers).
+- **Jump Rocket** hops the car over small obstacles (logs).
 - **Nitro Boost** burns the boost meter for a burst of speed.
-- Grab glowing **shield cells** to repair your shield.
-- Crashing into walls or hostiles drains your **shield** and stops the car.
-- Hitting innocent pedestrians triggers a warning penalty.
-- The mini-map shows the maze walls, threats, repair cells, your explored
+- Grab glowing green **gems** along the route for bonus points (optional).
+- The mini-map shows walls, threats, gems, **void pits (red)**, your explored
   trail, and your blinking location — but it **never reveals the VIP**. A
-  directional **rescue beacon** only appears once you are close. Reach the VIP
-  to complete the rescue and beat your best time.
+  directional **rescue beacon** appears once you are close.
 
-### Comfort & difficulty
+### Views, comfort & difficulty
 
-The camera is **north-up and stable** by default (the maze no longer spins
-around you) — you can switch to the harder rotating "cockpit" view in the
-pause menu. The default difficulty is **Easy**, the shield slowly regenerates
-when you avoid damage, crashing only bumps you (it never force-stops the car),
-pedestrians dodge out of your way, and an always-on **compass** points toward
-the VIP without revealing the exact tile.
+The default view is **first-person** — a pseudo-3D raycaster that puts you behind
+the windshield looking down the jungle path; cars, monsters, and people grow as
+they approach and are hidden behind walls. You can switch to the **classic
+top-down** view (and its optional rotating "cockpit" mode) from the pause menu.
 
-Mazes are carved with a **straight-corridor bias** so passages run long between
-turns (strongest on Easy) and extra connecting openings remove most dead-ends,
-making routes much easier to read and drive. Harder difficulties twist more.
+The default difficulty is **Easy** (shortest, straightest route with the fewest
+decoys). Normal and Hard have longer routes, more branches, and more void traps.
+An always-on **compass** points toward the VIP without revealing the exact tile.
 
 ## Highlights
 
+- **First-person pseudo-3D** jungle drive (raycaster) with textured foliage walls,
+  a forest floor/canopy, billboard sprites, and a cockpit hood — plus a classic
+  top-down view toggle.
+- Realistic procedural sprites: aggressive **rogue cars**, hulking **monsters**,
+  human **explorers**, and a human **VIP** (all drawn at runtime, no art files).
+- **Guided-route** generator: a mostly-straight path with looping branches and
+  deadly **void** traps; falling in restarts you at the start.
 - Procedural Web Audio engine (no sound files) with a dynamic engine hum.
-- Three difficulty presets with smarter, lightly homing enemy drivers.
-- Nitro boost, shield pickups, scoring, mission timer, and a saved best time.
-- Exhaust trails, speed lines, pixel explosions, damage flash, and win fireworks.
+- Nitro boost, score gems, scoring, mission timer, and a saved best time.
+- Auto-drive **DEMO** button that navigates the route for you.
 - Pause menu with accessibility toggles: screen shake, reduced motion, mute,
   **high contrast + threat marks**, **larger text**, and **mobile vibration**.
 - Full **touch controls** + responsive layout for phones and tablets.
-- **Lifetime stats** (runs, rescues, best score, kills, cells, playtime) saved
+- **Lifetime stats** (runs, rescues, best score, kills, gems, playtime) saved
   locally and shown on the intro and end screens, with a reset option.
-- Performance-tuned rendering (cached gradients + pre-rendered wall/sprite tiles,
-  fixed-timestep simulation) and high-DPI canvases.
+- Performance-tuned rendering (cached gradients + pre-rendered textures/sprites,
+  z-buffered billboards, fixed-timestep simulation) and high-DPI canvases.
 
 ## Project structure
 

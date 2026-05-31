@@ -70,14 +70,25 @@ assert.ok(env.store["umd_best_NORMAL"], "best time persisted");
 assert.ok(env.store["umd_stats"], "stats persisted");
 step(20); // fireworks frames
 
-// ---- lose path increments stats ----
-const runs2 = G.stats.runs;
+// ---- void fall restarts you at the start of the SAME maze (no shield) ----
 G.startNew();
-G.shield = 0;
+const startTile = G.world.tileCenter(G.world.start.gx, G.world.start.gy);
+assert.ok(G.world.voids.length >= 1, "world has a void hazard");
+const v = G.world.voids[0];
+const vc = G.world.tileCenter(v.gx, v.gy);
+const fallsBefore = G.falls;
+G.car.x = vc.x; G.car.y = vc.y;
 step(2);
-assert.strictEqual(G.state, "lost", "shield depletion loses");
-assert.strictEqual(G.stats.runs, runs2 + 1, "stats.runs incremented on loss");
-assert.ok(G.stats.losses >= 1, "stats.losses incremented");
+assert.strictEqual(G.state, "playing", "falling into a void does NOT end the run");
+assert.strictEqual(G.falls, fallsBefore + 1, "void fall increments falls counter");
+assert.ok(Math.abs(G.car.x - startTile.x) < 2 && Math.abs(G.car.y - startTile.y) < 2,
+  "void fall sends the car back to the start tile");
+
+// ---- top-down view still renders without error ----
+G.settings.firstPerson = false;
+step(3);
+G.settings.firstPerson = true;
+step(3);
 
 // ---- stats reset (C8) ----
 G.resetStats();

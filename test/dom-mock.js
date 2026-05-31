@@ -14,6 +14,7 @@ function makeCtx() {
     setTransform: noop, save: noop, restore: noop, translate: noop, rotate: noop,
     scale: noop, clearRect: noop, fillRect: noop, strokeRect: noop, beginPath: noop,
     moveTo: noop, lineTo: noop, arc: noop, arcTo: noop, ellipse: noop, closePath: noop,
+    quadraticCurveTo: noop, bezierCurveTo: noop, rect: noop, clip: noop,
     fill: noop, stroke: noop, fillText: noop, drawImage: noop,
     measureText: () => ({ width: 10 })
   };

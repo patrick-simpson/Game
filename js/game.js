@@ -50,7 +50,7 @@ window.MMR = window.MMR || {};
       this.keyLeft = false; this.keyRight = false; this.keyBoost = false; this.keyReverse = false;
 
       this.speedMode = "STOP";
-      this.shield = CFG.SHIELD_MAX;
+      this.falls = 0;
       this.pedestrianHits = 0;
       this.kills = 0; this.cells = 0;
       this.score = 0; this.finalScore = 0;
@@ -106,7 +106,7 @@ window.MMR = window.MMR || {};
       // Fix #1: stable north-up camera by default (rotateView off)
       let s = {
         shake: true, reducedMotion: false, muted: false, rotateView: false,
-        haptics: true, highContrast: false, bigText: false
+        haptics: true, highContrast: false, bigText: false, firstPerson: true
       };
       try {
         const raw = localStorage.getItem("umd_settings");
@@ -178,6 +178,7 @@ window.MMR = window.MMR || {};
       set("opt-shake", this.settings.shake);
       set("opt-motion", this.settings.reducedMotion);
       set("opt-mute", this.settings.muted);
+      set("opt-firstperson", this.settings.firstPerson);
       set("opt-rotate", this.settings.rotateView);
       set("opt-haptics", this.settings.haptics);
       set("opt-contrast", this.settings.highContrast);
@@ -216,6 +217,18 @@ window.MMR = window.MMR || {};
       const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.9);
       vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.55)");
       this._vignetteGrad = vg;
+
+      // first-person jungle canopy (upper) + forest-floor (lower) gradients
+      const sky = ctx.createLinearGradient(0, 0, 0, H * 0.6);
+      sky.addColorStop(0, "#06140a");      // dark canopy shadow
+      sky.addColorStop(0.55, "#16361a");   // mid leaves
+      sky.addColorStop(1, "#3f7a39");      // bright light near the horizon
+      this._fpCanopy = sky;
+      const floor = ctx.createLinearGradient(0, H * 0.4, 0, H);
+      floor.addColorStop(0, "#4a3a22");    // sunlit dirt at the horizon
+      floor.addColorStop(0.5, "#2c2415");
+      floor.addColorStop(1, "#161109");    // dark dirt underfoot
+      this._fpFloor = floor;
     }
 
     // B2: pre-render one wall + floor tile to offscreen canvases (once)
@@ -286,7 +299,7 @@ window.MMR = window.MMR || {};
       const s = this.world.tileCenter(this.world.start.gx, this.world.start.gy);
       this.car.x = s.x; this.car.y = s.y; this.car.angle = -Math.PI / 2;
       this.steer = 0; this.speedMode = "STOP";
-      this.shield = CFG.SHIELD_MAX;
+      this.falls = 0;
       this.pedestrianHits = 0; this.kills = 0; this.cells = 0;
       this.score = 0; this.finalScore = 0; this.elapsedMs = 0;
       this.hitCooldown = 0;
@@ -305,7 +318,7 @@ window.MMR = window.MMR || {};
       this.dashboard.setActiveSpeed("STOP");
       this._hideOverlay();
       this.pauseOverlay.classList.remove("show");
-      this._showToast("Press GO (or ↑) to drive — reach the VIP! (or DEMO to watch)");
+      this._showToast("Drive the path to the VIP — take the right turns, avoid the void!");
       this._resize();
     }
 
@@ -394,6 +407,7 @@ window.MMR = window.MMR || {};
           this._saveSettings();
         });
       };
+      bind("opt-firstperson", "firstPerson");
       bind("opt-shake", "shake");
       bind("opt-motion", "reducedMotion");
       bind("opt-mute", "muted");
@@ -653,10 +667,11 @@ window.MMR = window.MMR || {};
           if (col.kind === "obstacle") return !this.jump.active;
           return false;
         };
-        // axis-separated so the car slides smoothly along walls
+        // axis-separated so the car slides smoothly along walls. Walls are
+        // harmless now — they just stop you; only a void can end the run.
         if (!blocked(car.x + vx, car.y)) car.x += vx; else crashed = true;
         if (!blocked(car.x, car.y + vy)) car.y += vy; else crashed = true;
-        if (crashed && this.hitCooldown === 0) this._damage(CFG.WALL_HIT_DAMAGE);
+        if (crashed && this.hitCooldown === 0) { this._addShake(3); this.hitCooldown = 8; }
 
         // exhaust trail (behind the direction of travel)
         if (Math.random() < (this.boost.active ? 0.9 : 0.5)) {
@@ -694,12 +709,6 @@ window.MMR = window.MMR || {};
       if (this.flashLevel > 0) this.flashLevel = Math.max(0, this.flashLevel - 0.05);
       if (this.hitCooldown > 0) this.hitCooldown--;
 
-      // Fix #5: shield slowly regenerates once you've avoided damage a while
-      this.regenTimer++;
-      if (this.regenTimer > CFG.REGEN_DELAY && this.shield < CFG.SHIELD_MAX) {
-        this.shield = Math.min(CFG.SHIELD_MAX, this.shield + CFG.SHIELD_REGEN);
-      }
-
       // camera look-ahead (Improvement #17)
       let targetCam = 0.6 + (CFG.SPEEDS[this.speedMode] / CFG.SPEEDS.FAST) * 0.08 + (this.boost.active ? 0.03 : 0);
       this.camY += (targetCam - this.camY) * 0.06;
@@ -714,21 +723,30 @@ window.MMR = window.MMR || {};
       // live score (Improvement #12)
       this.score = Math.max(0, this.kills * 100 + this.cells * 25 - this.pedestrianHits * 20);
 
-      // win / lose
+      // win + void fall: reaching the VIP wins; driving into a void restarts you
       if (U.dist(car.x, car.y, w.vip.x, w.vip.y) < CFG.VIP_REACH) this._win();
-      if (this.shield <= 0) this._lose();
+      else if (w.isVoid(Math.floor(car.x / CFG.TILE), Math.floor(car.y / CFG.TILE))) this._fall();
 
       this.dashboard.updateHud(this);
       this.dashboard.updateCooldowns(this);
     }
 
-    _damage(amount) {
-      this.shield = Math.max(0, this.shield - amount);
-      this.hitCooldown = CFG.HIT_COOLDOWN;
-      this.regenTimer = 0; // Fix #5: pause regen after taking a hit
-      this._addShake(10);
-      this.flashLevel = 1; // red damage flash (Improvement #10)
-      this._haptic([30, 20, 30]);
+    // The only way to fail: drive off the route into a void. We don't end the
+    // run — we just send you back to the start of the SAME maze to try again.
+    _fall() {
+      if (this.state !== "playing") return;
+      this.falls = (this.falls || 0) + 1;
+      const w = this.world, s = w.tileCenter(w.start.gx, w.start.gy);
+      this.car.x = s.x; this.car.y = s.y; this.car.angle = -Math.PI / 2;
+      this.steer = 0; this.setSpeedMode("STOP");
+      this.boost.active = false; this.boost.burst = 0;
+      this.hitCooldown = CFG.START_GRACE;
+      this.leadX = 0; this.leadY = 0;
+      this.flashLevel = 1;
+      this._addShake(16);
+      this.audio.crash();
+      this._haptic([60, 30, 60]);
+      this._showToast("Fell into the void — back to the start!");
     }
 
     // Fix #14: push the car away from whatever it hit so you don't get
@@ -757,9 +775,14 @@ window.MMR = window.MMR || {};
             const ang = Math.atan2(e.y - car.y, e.x - car.x);
             e.x += Math.cos(ang) * 16; e.y += Math.sin(ang) * 16;
           } else if (this.hitCooldown === 0) {
-            this._damage(CFG.HOSTILE_HIT_DAMAGE);
+            // hostiles are non-lethal now: they just shove you back hard
             const ang = Math.atan2(car.y - e.y, car.x - e.x);
-            this._knockback(Math.cos(ang), Math.sin(ang), 20);
+            this._knockback(Math.cos(ang), Math.sin(ang), 24);
+            this.hitCooldown = CFG.HIT_COOLDOWN;
+            this.flashLevel = 0.7;
+            this._addShake(10);
+            this.audio.crash();
+            this._haptic([30, 20, 30]);
             e.cool = 30;
           }
         }
@@ -769,9 +792,8 @@ window.MMR = window.MMR || {};
     _pickupCollisions() {
       for (const p of this.world.pickups) {
         if (p.taken) continue;
-        if (U.dist(this.car.x, this.car.y, p.x, p.y) < CFG.CAR_RADIUS + 14) {
-          p.taken = true; this.cells++;
-          this.shield = Math.min(CFG.SHIELD_MAX, this.shield + CFG.SHIELD_PICKUP);
+        if (U.dist(this.car.x, this.car.y, p.x, p.y) < CFG.CAR_RADIUS + CFG.GEM_PICKUP) {
+          p.taken = true; this.cells++; // gems count toward score
           this.audio.pickup();
           this._haptic([10, 30, 10]);
           this._spawnSparkle(p.x, p.y, "#39ff88");
@@ -801,15 +823,18 @@ window.MMR = window.MMR || {};
       while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
       while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
 
-      // Cast rays ahead to detect obstacles (check 5 angles: forward + 4 offset angles)
-      const checkDistance = 60;
+      // Cast rays ahead to detect hazards (5 angles: forward + 4 offsets).
+      // Treat walls/obstacles AND voids as "blocked" so the demo never drives
+      // itself off the route into a pit.
+      const checkDistance = 60, T = CFG.TILE;
       const rays = [0, -Math.PI / 6, Math.PI / 6, -Math.PI / 3, Math.PI / 3];
       const obstacles = [];
       for (const offset of rays) {
         const checkAngle = currentAngle + offset;
         const px = car.x + Math.cos(checkAngle) * checkDistance;
         const py = car.y + Math.sin(checkAngle) * checkDistance;
-        const blocked = w.carCollision(px, py, CFG.CAR_RADIUS);
+        const blocked = w.carCollision(px, py, CFG.CAR_RADIUS) ||
+          w.isVoid(Math.floor(px / T), Math.floor(py / T));
         obstacles.push({ offset, blocked: !!blocked });
       }
 
@@ -839,9 +864,10 @@ window.MMR = window.MMR || {};
       const intensity = U.clamp(1 - d / rangePx, 0, 1);
 
       const worldAng = Math.atan2(w.vip.y - car.y, w.vip.x - car.x);
-      // In north-up mode screen angle == world angle; in rotating mode the
-      // whole view is spun so heading points up.
-      const screenAng = this.settings.rotateView
+      // In north-up mode screen angle == world angle; in first-person and the
+      // rotating cockpit the view is aligned to the heading, so the compass
+      // points relative to where the car is facing.
+      const screenAng = (this.settings.rotateView || this.settings.firstPerson)
         ? worldAng - (car.angle + Math.PI / 2)
         : worldAng;
       const radius = Math.min(this.vw, this.vh) * 0.34;
@@ -861,10 +887,10 @@ window.MMR = window.MMR || {};
       this.beacon.classList.remove("on");
       this.audio.silenceEngine();
       this.audio.rescue();
-      // bonus: time + shield (Improvement #12)
+      // bonus: faster rescues + fewer falls score higher
       const timeBonus = Math.max(0, 600 - Math.floor(this.elapsedMs / 1000) * 3);
-      const shieldBonus = Math.round(this.shield * 4);
-      this.finalScore = this.score + timeBonus + shieldBonus;
+      const fallPenalty = (this.falls || 0) * 50;
+      this.finalScore = Math.max(0, this.score + timeBonus - fallPenalty);
       // best time
       const prev = Number(localStorage.getItem(this._bestKey()) || 0);
       const newBest = (!prev || this.elapsedMs < prev);
@@ -910,9 +936,9 @@ window.MMR = window.MMR || {};
           <div class="stat-grid">
             <div><span>TIME</span><b>${time}${newBest ? " &#11088;" : ""}</b></div>
             <div><span>SCORE</span><b>${this.finalScore}</b></div>
-            <div><span>SHIELD</span><b>${Math.round(this.shield)}%</b></div>
+            <div><span>VOID FALLS</span><b>${this.falls || 0}</b></div>
             <div><span>THREATS DOWN</span><b>${this.kills}</b></div>
-            <div><span>CELLS</span><b>${this.cells}</b></div>
+            <div><span>GEMS</span><b>${this.cells}</b></div>
             <div><span>PED. HITS</span><b>${this.pedestrianHits}</b></div>
           </div>
           ${newBest ? '<p class="overlay-best new">NEW BEST TIME!</p>' : ""}
@@ -1025,11 +1051,23 @@ window.MMR = window.MMR || {};
       if (!this.world) { this._renderIdle(ctx, W, H); return; }
 
       const car = this.car;
-      const rotate = this.settings.rotateView;
       const shakeAmt = (this.settings.shake && !this.settings.reducedMotion) ? this.shake : 0;
       const sxk = (Math.random() - 0.5) * shakeAmt;
       const syk = (Math.random() - 0.5) * shakeAmt;
 
+      // First-person windshield (pseudo-3D raycaster) — the default view.
+      if (this.settings.firstPerson) {
+        this.viewCx = W / 2; this.viewCy = H / 2;
+        this._renderFirstPerson(ctx, W, H, sxk, syk);
+        if (!this.settings.reducedMotion && (this.speedMode === "FAST" || this.boost.active)) {
+          this._renderSpeedLines(ctx, W / 2, H / 2);
+        }
+        if (!this._vignetteGrad) this._buildViewGradients();
+        ctx.fillStyle = this._vignetteGrad; ctx.fillRect(0, 0, W, H);
+        return;
+      }
+
+      const rotate = this.settings.rotateView;
       // Fix #1 & #17: north-up stable camera with smooth look-ahead, or the
       // optional rotating "cockpit" view.
       const speedFactor = (this.keyReverse ? 0 : CFG.SPEEDS[this.speedMode] / CFG.SPEEDS.FAST);
@@ -1083,12 +1121,399 @@ window.MMR = window.MMR || {};
     }
 
     _renderIdle(ctx, W, H) {
-      // subtle moving grid behind the intro menu
-      ctx.strokeStyle = "rgba(47,243,255,0.06)";
+      // subtle moving grid behind the intro menu (jungle tint)
+      ctx.strokeStyle = "rgba(57,255,136,0.06)";
       ctx.lineWidth = 1;
       const off = (performance.now() / 40) % 48;
       for (let x = -48 + off; x < W; x += 48) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
       for (let y = -48 + off; y < H; y += 48) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    }
+
+    // ============================================================
+    // First-person pseudo-3D (raycaster). You're inside the car
+    // looking down the jungle corridor; walls recede ahead, cars /
+    // monsters / people grow as they approach, and a wrong turn
+    // opens onto a void.
+    // ============================================================
+    _renderFirstPerson(ctx, W, H, sxk, syk) {
+      const w = this.world, car = this.car, T = CFG.TILE;
+      if (!this._fpCanopy) this._buildViewGradients();
+      if (!this._jungleWall) this._buildJungleTextures();
+      if (!this._spr) this._buildBillboards();
+
+      // a little vertical bob from shake / jumping for "in the seat" feel
+      const lift = this.jump.active
+        ? Math.sin((1 - this.jump.timer / CFG.JUMP_DURATION) * Math.PI) * 40 : 0;
+      const horizon = Math.round(H * 0.52 + syk - lift);
+
+      // canopy + forest floor
+      ctx.fillStyle = this._fpCanopy; ctx.fillRect(0, 0, W, horizon);
+      ctx.fillStyle = this._fpFloor; ctx.fillRect(0, horizon, W, H - horizon);
+
+      const FOV = Math.PI / 3;                 // 60° field of view
+      const focal = (W / 2) / Math.tan(FOV / 2);
+      const tanH = Math.tan(FOV / 2);
+      const STEP = 2;                          // px per cast column
+      const cols = Math.ceil(W / STEP);
+      if (!this._zbuf || this._zbuf.length < cols) this._zbuf = new Float32Array(cols);
+      const zbuf = this._zbuf;
+
+      const tex = this._jungleWall, voidTex = this._voidEdge;
+      const posX = car.x / T, posY = car.y / T;
+      const maxFog = 9 * T; // full darkness distance
+
+      for (let i = 0; i < cols; i++) {
+        const sx = i * STEP;
+        const camX = ((sx + STEP / 2) / W) * 2 - 1;     // -1 .. 1
+        const rayAng = car.angle + Math.atan(camX * tanH);
+        const dirX = Math.cos(rayAng), dirY = Math.sin(rayAng);
+
+        let mapX = Math.floor(posX), mapY = Math.floor(posY);
+        const deltaX = dirX === 0 ? 1e30 : Math.abs(1 / dirX);
+        const deltaY = dirY === 0 ? 1e30 : Math.abs(1 / dirY);
+        let stepX, stepY, sideDistX, sideDistY;
+        if (dirX < 0) { stepX = -1; sideDistX = (posX - mapX) * deltaX; }
+        else { stepX = 1; sideDistX = (mapX + 1 - posX) * deltaX; }
+        if (dirY < 0) { stepY = -1; sideDistY = (posY - mapY) * deltaY; }
+        else { stepY = 1; sideDistY = (mapY + 1 - posY) * deltaY; }
+
+        let side = 0, hit = false, guard = 0;
+        let voidDist = -1;
+        while (!hit && guard++ < 64) {
+          if (sideDistX < sideDistY) { sideDistX += deltaX; mapX += stepX; side = 0; }
+          else { sideDistY += deltaY; mapY += stepY; side = 1; }
+          if (mapX < 0 || mapY < 0 || mapX >= w.gw || mapY >= w.gh) { hit = true; break; }
+          const g = w.grid[mapY][mapX];
+          if (g === 1) hit = true;
+          else if (g === 2 && voidDist < 0) {
+            voidDist = (side === 0 ? sideDistX - deltaX : sideDistY - deltaY) * T;
+          }
+        }
+        const perp = (side === 0 ? sideDistX - deltaX : sideDistY - deltaY);
+        const distPx = Math.max(1, perp * T);
+        zbuf[i] = distPx;
+
+        const sliceH = (focal * T) / distPx;
+        const top = horizon - sliceH * 0.5;
+
+        // textured wall column
+        let wallX = side === 0 ? posY + perp * dirY : posX + perp * dirX;
+        wallX -= Math.floor(wallX);
+        let texX = Math.floor(wallX * tex.width);
+        if ((side === 0 && dirX > 0) || (side === 1 && dirY < 0)) texX = tex.width - texX - 1;
+        ctx.drawImage(tex, texX, 0, 1, tex.height, sx, top, STEP, sliceH);
+
+        // distance fog + side shading
+        const fog = U.clamp(distPx / maxFog, 0, 0.82) * (side === 1 ? 1 : 0.82);
+        if (fog > 0.01) {
+          ctx.fillStyle = "rgba(4,10,6," + fog.toFixed(3) + ")";
+          ctx.fillRect(sx, top, STEP, sliceH);
+        }
+
+        // a void ahead: paint the floor of this column as a dark abyss
+        if (voidDist > 0) {
+          const wallBottom = top + sliceH;
+          const rimY = horizon + (focal * (T / 2)) / Math.max(1, voidDist);
+          const abyssTop = Math.max(horizon, wallBottom);
+          if (rimY > abyssTop) {
+            ctx.drawImage(voidTex, 0, 0, voidTex.width, voidTex.height, sx, abyssTop, STEP, rimY - abyssTop);
+          }
+        }
+      }
+
+      // ---- billboard sprites (entities, VIP, gems, obstacles) ----
+      const cosA = Math.cos(car.angle), sinA = Math.sin(car.angle);
+      const list = [];
+      const add = (x, y, img, worldH, floatY) => {
+        const dx = x - car.x, dy = y - car.y;
+        const depth = dx * cosA + dy * sinA;       // forward distance (px)
+        if (depth < 12) return;                    // behind / on top of camera
+        const sideways = -dx * sinA + dy * cosA;
+        const screenX = W / 2 + (sideways / depth) * focal;
+        const spriteH = (focal * worldH) / depth;
+        const spriteW = spriteH * (img.width / img.height);
+        if (screenX + spriteW < 0 || screenX - spriteW > W) return;
+        // feet on the floor; floating things (gems) ride at eye level
+        const feetY = horizon + (focal * (T / 2)) / depth;
+        const topY = floatY ? horizon - spriteH / 2 : feetY - spriteH;
+        list.push({ depth, screenX, spriteW, spriteH, topY, img });
+      };
+
+      for (const o of w.obstacles) {
+        const c = w.tileCenter(o.gx, o.gy);
+        add(c.x, c.y, this._spr.log, T * 0.55, false);
+      }
+      for (const p of w.pickups) {
+        if (p.taken) continue;
+        p.bob += 0.08;
+        add(p.x, p.y + Math.sin(p.bob) * 4, this._spr.gem, T * 0.5, true);
+      }
+      for (const e of w.entities) {
+        if (!e.alive) continue;
+        const img = e.type === "driver" ? this._spr.car
+          : e.type === "creature" ? this._spr.monster : this._spr.human;
+        const wh = e.type === "driver" ? T * 0.85 : e.type === "creature" ? T * 0.95 : T * 1.0;
+        add(e.x, e.y, img, wh, false);
+      }
+      w.vip.bob += 0.06;
+      add(w.vip.x, w.vip.y + Math.sin(w.vip.bob) * 2, this._spr.vip, T * 1.05, false);
+
+      list.sort((a, b) => b.depth - a.depth); // far → near
+      for (const s of list) this._blitBillboard(ctx, s, STEP);
+
+      // laser beam as a bright bolt down the centre when firing
+      if (this.laser.beam && this.laser.beam.life > 0) {
+        const a = this.laser.beam.life / 12;
+        ctx.save();
+        ctx.globalAlpha = a;
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.shadowColor = "#ff2bd6"; ctx.shadowBlur = 14;
+        ctx.beginPath(); ctx.moveTo(W / 2, horizon + 10); ctx.lineTo(W / 2, horizon - 40); ctx.stroke();
+        ctx.restore();
+      }
+
+      // ---- cockpit: hood + windshield pillars so you feel seated inside ----
+      this._renderCockpit(ctx, W, H, horizon);
+    }
+
+    // draw one billboard with per-column wall occlusion via the z-buffer
+    _blitBillboard(ctx, s, STEP) {
+      const left = s.screenX - s.spriteW / 2;
+      const img = s.img;
+      for (let x = Math.floor(left); x < left + s.spriteW; x += STEP) {
+        if (x < 0 || x >= this.vw) continue;
+        const ci = Math.floor(x / STEP);
+        if (s.depth >= (this._zbuf[ci] || 1e30)) continue; // hidden behind a wall
+        const u = (x - left) / s.spriteW;
+        const srcX = U.clamp(Math.floor(u * img.width), 0, img.width - 1);
+        ctx.drawImage(img, srcX, 0, 1, img.height, x, s.topY, STEP, s.spriteH);
+      }
+    }
+
+    _renderCockpit(ctx, W, H, horizon) {
+      // subtle darkened windshield pillars
+      ctx.fillStyle = "rgba(6,10,16,0.85)";
+      ctx.beginPath();
+      ctx.moveTo(0, 0); ctx.lineTo(W * 0.13, 0); ctx.lineTo(0, H * 0.5); ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(W, 0); ctx.lineTo(W * 0.87, 0); ctx.lineTo(W, H * 0.5); ctx.closePath(); ctx.fill();
+      // hood / dashboard lip at the bottom
+      const hoodTop = H * 0.82;
+      const g = this._hoodGrad || (this._hoodGrad = (() => {
+        const gr = ctx.createLinearGradient(0, hoodTop, 0, H);
+        gr.addColorStop(0, "#13202f"); gr.addColorStop(0.25, "#0c1622"); gr.addColorStop(1, "#05080d");
+        return gr;
+      })());
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.moveTo(0, H); ctx.lineTo(0, hoodTop + 14);
+      ctx.quadraticCurveTo(W / 2, hoodTop - 18, W, hoodTop + 14);
+      ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+      // hood centre seam + a glint
+      ctx.strokeStyle = "rgba(120,180,255,0.18)"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(W / 2, hoodTop - 6); ctx.lineTo(W / 2, H); ctx.stroke();
+    }
+
+    // B1/B2: jungle wall texture (sampled per ray column) + void abyss strip
+    _buildJungleTextures() {
+      const T = CFG.TILE;
+      const wc = document.createElement("canvas"); wc.width = T; wc.height = T;
+      const c = wc.getContext("2d");
+      const g = c.createLinearGradient(0, 0, 0, T);
+      g.addColorStop(0, "#0c2a14"); g.addColorStop(0.5, "#15331b"); g.addColorStop(1, "#0a1f10");
+      c.fillStyle = g; c.fillRect(0, 0, T, T);
+      // mossy stone blocks
+      c.fillStyle = "rgba(40,60,38,0.6)";
+      for (let yy = 0; yy < T; yy += 16) {
+        const off = (yy / 16) % 2 === 0 ? 0 : 12;
+        for (let xx = -12; xx < T; xx += 24) {
+          c.fillRect(xx + off + 1, yy + 1, 22, 14);
+        }
+      }
+      // vines + leaves
+      for (let n = 0; n < 26; n++) {
+        const lx = Math.random() * T, ly = Math.random() * T;
+        c.fillStyle = `rgba(${30 + U.rand(40)},${90 + U.rand(80)},${40 + U.rand(40)},0.7)`;
+        c.beginPath(); c.ellipse(lx, ly, 3 + Math.random() * 4, 1.5 + Math.random() * 2,
+          Math.random() * Math.PI, 0, Math.PI * 2); c.fill();
+      }
+      c.strokeStyle = "rgba(20,40,20,0.5)"; c.lineWidth = 2;
+      for (let n = 0; n < 3; n++) {
+        const vx = U.rand(T);
+        c.beginPath(); c.moveTo(vx, 0);
+        for (let yy = 0; yy < T; yy += 8) c.lineTo(vx + Math.sin(yy * 0.3) * 5, yy);
+        c.stroke();
+      }
+      this._jungleWall = wc;
+
+      // void abyss vertical strip (dark with a faint hot rim at the top)
+      const vc = document.createElement("canvas"); vc.width = 2; vc.height = 64;
+      const v = vc.getContext("2d");
+      const vg = v.createLinearGradient(0, 0, 0, 64);
+      vg.addColorStop(0, "rgba(120,30,40,0.85)"); // rim glow at the near edge
+      vg.addColorStop(0.12, "#0a0205");
+      vg.addColorStop(1, "#000000");
+      v.fillStyle = vg; v.fillRect(0, 0, 2, 64);
+      this._voidEdge = vc;
+    }
+
+    // B3-B7: realistic-ish billboard sprites, drawn once, facing the camera
+    _buildBillboards() {
+      this._spr = {
+        car: this._makeCarSprite(),
+        monster: this._makeMonsterSprite(),
+        human: this._makeHumanSprite(false),
+        vip: this._makeHumanSprite(true),
+        gem: this._makeGemSprite(),
+        log: this._makeLogSprite()
+      };
+    }
+
+    _makeCarSprite() {
+      const cv = document.createElement("canvas"); cv.width = 96; cv.height = 96;
+      const c = cv.getContext("2d");
+      // shadow
+      c.fillStyle = "rgba(0,0,0,0.35)"; c.beginPath();
+      c.ellipse(48, 90, 38, 7, 0, 0, Math.PI * 2); c.fill();
+      // body (aggressive front view) — dark red with shading
+      const bg = c.createLinearGradient(0, 30, 0, 86);
+      bg.addColorStop(0, "#b71f24"); bg.addColorStop(0.5, "#7c1216"); bg.addColorStop(1, "#3c0809");
+      c.fillStyle = bg; c.strokeStyle = "#1a0203"; c.lineWidth = 2;
+      this._roundRect(c, 12, 34, 72, 52, 10); c.fill(); c.stroke();
+      // hood scoop
+      c.fillStyle = "#250405"; this._roundRect(c, 38, 30, 20, 12, 3); c.fill();
+      // windshield
+      const ws = c.createLinearGradient(0, 38, 0, 58);
+      ws.addColorStop(0, "#0a1822"); ws.addColorStop(1, "#33637a");
+      c.fillStyle = ws; this._roundRect(c, 22, 40, 52, 18, 5); c.fill();
+      // grille
+      c.fillStyle = "#0a0506"; this._roundRect(c, 30, 62, 36, 16, 3); c.fill();
+      c.strokeStyle = "#555"; c.lineWidth = 1;
+      for (let gx = 34; gx < 66; gx += 5) { c.beginPath(); c.moveTo(gx, 63); c.lineTo(gx, 77); c.stroke(); }
+      // bull bar
+      c.strokeStyle = "#c9ccd2"; c.lineWidth = 4;
+      c.beginPath(); c.moveTo(20, 80); c.lineTo(76, 80); c.stroke();
+      c.lineWidth = 3;
+      c.beginPath(); c.moveTo(30, 72); c.lineTo(30, 86); c.moveTo(66, 72); c.lineTo(66, 86); c.stroke();
+      // glaring headlights
+      for (const hx of [26, 70]) {
+        const hg = c.createRadialGradient(hx, 60, 1, hx, 60, 9);
+        hg.addColorStop(0, "#fffce0"); hg.addColorStop(1, "rgba(255,210,90,0)");
+        c.fillStyle = hg; c.beginPath(); c.arc(hx, 60, 9, 0, Math.PI * 2); c.fill();
+        c.fillStyle = "#fff7c2"; c.beginPath(); c.arc(hx, 60, 3.5, 0, Math.PI * 2); c.fill();
+      }
+      return cv;
+    }
+
+    _makeMonsterSprite() {
+      const cv = document.createElement("canvas"); cv.width = 96; cv.height = 96;
+      const c = cv.getContext("2d");
+      c.fillStyle = "rgba(0,0,0,0.35)"; c.beginPath();
+      c.ellipse(48, 91, 30, 6, 0, 0, Math.PI * 2); c.fill();
+      // hunched beast body
+      const bg = c.createLinearGradient(0, 24, 0, 90);
+      bg.addColorStop(0, "#3c5a2a"); bg.addColorStop(0.6, "#274019"); bg.addColorStop(1, "#142309");
+      c.fillStyle = bg; c.strokeStyle = "#0c1606"; c.lineWidth = 2;
+      c.beginPath(); c.ellipse(48, 60, 30, 30, 0, 0, Math.PI * 2); c.fill(); c.stroke();
+      // shoulders / arms
+      c.beginPath(); c.ellipse(20, 64, 12, 18, 0.3, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.ellipse(76, 64, 12, 18, -0.3, 0, Math.PI * 2); c.fill();
+      // clawed hands
+      c.fillStyle = "#0c1606";
+      for (const hx of [16, 80]) {
+        for (let k = -1; k <= 1; k++) { c.beginPath(); c.moveTo(hx + k * 4, 80); c.lineTo(hx + k * 4, 90); c.lineWidth = 2; c.stroke(); }
+      }
+      // head
+      c.fillStyle = "#33501f"; c.beginPath(); c.ellipse(48, 36, 18, 16, 0, 0, Math.PI * 2); c.fill(); c.stroke();
+      // horns
+      c.fillStyle = "#d8cdb0"; c.strokeStyle = "#7a6f55";
+      c.beginPath(); c.moveTo(34, 26); c.lineTo(26, 8); c.lineTo(40, 22); c.closePath(); c.fill();
+      c.beginPath(); c.moveTo(62, 26); c.lineTo(70, 8); c.lineTo(56, 22); c.closePath(); c.fill();
+      // glowing eyes
+      for (const ex of [41, 55]) {
+        const eg = c.createRadialGradient(ex, 36, 0.5, ex, 36, 6);
+        eg.addColorStop(0, "#fff2a0"); eg.addColorStop(0.5, "#ff8a1e"); eg.addColorStop(1, "rgba(255,60,0,0)");
+        c.fillStyle = eg; c.beginPath(); c.arc(ex, 36, 6, 0, Math.PI * 2); c.fill();
+        c.fillStyle = "#1a0a00"; c.beginPath(); c.arc(ex, 36, 1.6, 0, Math.PI * 2); c.fill();
+      }
+      // fangs
+      c.fillStyle = "#fff";
+      c.beginPath(); c.moveTo(43, 46); c.lineTo(46, 54); c.lineTo(48, 46); c.closePath(); c.fill();
+      c.beginPath(); c.moveTo(48, 46); c.lineTo(50, 54); c.lineTo(53, 46); c.closePath(); c.fill();
+      return cv;
+    }
+
+    _makeHumanSprite(isVip) {
+      const cv = document.createElement("canvas"); cv.width = 56; cv.height = 96;
+      const c = cv.getContext("2d");
+      c.fillStyle = "rgba(0,0,0,0.3)"; c.beginPath();
+      c.ellipse(28, 92, 16, 5, 0, 0, Math.PI * 2); c.fill();
+      if (isVip) { // glowing ground ring
+        const rg = c.createRadialGradient(28, 90, 4, 28, 90, 22);
+        rg.addColorStop(0, "rgba(255,215,80,0.5)"); rg.addColorStop(1, "rgba(255,215,80,0)");
+        c.fillStyle = rg; c.beginPath(); c.ellipse(28, 90, 22, 8, 0, 0, Math.PI * 2); c.fill();
+      }
+      const shirt = isVip ? "#ffd24a" : "#3f7ec4";
+      const pants = isVip ? "#5a4a14" : "#2b3a52";
+      const skin = "#e8b07a";
+      // legs
+      c.fillStyle = pants;
+      this._roundRect(c, 20, 60, 7, 28, 3); c.fill();
+      this._roundRect(c, 29, 60, 7, 28, 3); c.fill();
+      // torso
+      c.fillStyle = shirt; this._roundRect(c, 16, 34, 24, 30, 7); c.fill();
+      // arms
+      c.fillStyle = shirt;
+      this._roundRect(c, 10, 36, 7, 22, 3); c.fill();
+      if (isVip) { // waving arm raised
+        c.save(); c.translate(43, 38); c.rotate(-0.6);
+        this._roundRect(c, 0, -4, 7, 22, 3); c.fill(); c.restore();
+      } else {
+        this._roundRect(c, 39, 36, 7, 22, 3); c.fill();
+      }
+      // hands
+      c.fillStyle = skin;
+      c.beginPath(); c.arc(13, 58, 4, 0, Math.PI * 2); c.fill();
+      // head
+      c.fillStyle = skin; c.beginPath(); c.arc(28, 22, 11, 0, Math.PI * 2); c.fill();
+      // hair
+      c.fillStyle = isVip ? "#3a2a12" : "#23344a";
+      c.beginPath(); c.arc(28, 19, 11, Math.PI, 0); c.fill();
+      // eyes
+      c.fillStyle = "#1a1208";
+      c.beginPath(); c.arc(24, 23, 1.4, 0, Math.PI * 2); c.arc(32, 23, 1.4, 0, Math.PI * 2); c.fill();
+      if (isVip) {
+        c.fillStyle = "#fff"; c.font = "bold 12px Consolas, monospace"; c.textAlign = "center";
+        c.fillText("VIP", 28, 8);
+      }
+      return cv;
+    }
+
+    _makeGemSprite() {
+      const cv = document.createElement("canvas"); cv.width = 40; cv.height = 48;
+      const c = cv.getContext("2d");
+      const g = c.createLinearGradient(0, 6, 0, 42);
+      g.addColorStop(0, "#b6ffd0"); g.addColorStop(0.5, "#39ff88"); g.addColorStop(1, "#0f9a4e");
+      c.fillStyle = g; c.strokeStyle = "#eafff2"; c.lineWidth = 1.5;
+      c.beginPath();
+      c.moveTo(20, 4); c.lineTo(34, 18); c.lineTo(20, 44); c.lineTo(6, 18); c.closePath();
+      c.fill(); c.stroke();
+      c.strokeStyle = "rgba(255,255,255,0.6)"; c.lineWidth = 1;
+      c.beginPath(); c.moveTo(20, 4); c.lineTo(20, 44); c.moveTo(6, 18); c.lineTo(34, 18); c.stroke();
+      return cv;
+    }
+
+    _makeLogSprite() {
+      const cv = document.createElement("canvas"); cv.width = 80; cv.height = 48;
+      const c = cv.getContext("2d");
+      c.fillStyle = "rgba(0,0,0,0.3)"; c.beginPath(); c.ellipse(40, 44, 34, 5, 0, 0, Math.PI * 2); c.fill();
+      const g = c.createLinearGradient(0, 12, 0, 44);
+      g.addColorStop(0, "#7a5230"); g.addColorStop(1, "#3c2814");
+      c.fillStyle = g; c.strokeStyle = "#2a1c0e"; c.lineWidth = 2;
+      this._roundRect(c, 6, 16, 68, 26, 12); c.fill(); c.stroke();
+      // end rings
+      c.fillStyle = "#9c6b3f"; c.beginPath(); c.ellipse(12, 29, 6, 13, 0, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = "#5c3c1e"; c.beginPath(); c.ellipse(12, 29, 3, 7, 0, 0, Math.PI * 2); c.stroke();
+      return cv;
     }
 
     _renderWorld(ctx) {

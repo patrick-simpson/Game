@@ -29,8 +29,8 @@
         <div id="hud">
           <div class="hud-left">
             <div class="hud-pill">
-              <span class="hud-label">SHIELD</span>
-              <div class="bar-track"><div id="shield-fill" class="bar-fill"></div></div>
+              <span class="hud-label">VOID FALLS</span>
+              <span id="falls-readout" class="hud-value" aria-live="polite">0</span>
             </div>
             <div class="hud-pill">
               <span class="hud-label">BOOST</span>
@@ -101,12 +101,22 @@
           <canvas id="confetti" width="960" height="430"></canvas>
           <div class="overlay-card">
             <h1 class="overlay-title">ULTRA MAZE DRIVER</h1>
-            <p class="overlay-sub">MEGA MAZE RESCUE &mdash; DASHBOARD SIMULATOR</p>
+            <p class="overlay-sub">JUNGLE RESCUE &mdash; FIRST-PERSON DRIVE</p>
             <p class="overlay-text">
-              A VIP is lost deep in the containment zone. Drive the spy car through the
-              maze, dodge rogue drivers &amp; creatures, avoid pedestrians, grab shield
-              cells, and reach the VIP to complete the rescue.
+              A VIP is lost deep in the jungle. You're behind the wheel &mdash; drive
+              the corridor and take the right turns to reach them.
             </p>
+
+            <div class="howto">
+              <p class="howto-title">HOW TO PLAY</p>
+              <ul class="howto-list">
+                <li><b>Goal:</b> follow the path through the jungle and reach the <b>VIP</b>.</li>
+                <li><b>Steer</b> with &larr;/&rarr; or the wheel; <b>GO / FAST / SLOW / STOP</b> to drive, <b>BOOST</b> for speed.</li>
+                <li><b>LASER</b> blasts rogue cars &amp; monsters; <b>JUMP</b> hops obstacles; <b>REVERSE</b> backs up.</li>
+                <li>Take the right turns &mdash; wrong ones loop back. <b>Don't drive into the VOID</b> or you start over!</li>
+                <li>Grab glowing green <b>gems</b> for bonus points. Use the mini-map (voids show as red pits).</li>
+              </ul>
+            </div>
 
             <div class="diff-select">
               <span class="diff-label">DIFFICULTY</span>
@@ -128,7 +138,8 @@
           <div class="overlay-card">
             <h1 class="overlay-title">PAUSED</h1>
             <div class="settings">
-              <label class="toggle"><input type="checkbox" id="opt-rotate" /> Rotating view (harder)</label>
+              <label class="toggle"><input type="checkbox" id="opt-firstperson" checked /> First-person view (off = classic top-down)</label>
+              <label class="toggle"><input type="checkbox" id="opt-rotate" /> Rotating view (top-down only)</label>
               <label class="toggle"><input type="checkbox" id="opt-shake" checked /> Screen shake</label>
               <label class="toggle"><input type="checkbox" id="opt-motion" /> Reduce motion</label>
               <label class="toggle"><input type="checkbox" id="opt-mute" /> Mute audio</label>

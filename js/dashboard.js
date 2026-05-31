@@ -26,7 +26,7 @@ window.MMR = window.MMR || {};
       this.jumpBtn = document.getElementById("jump-btn");
       this.boostBtn = document.getElementById("boost-btn");
 
-      this.shieldFill = document.getElementById("shield-fill");
+      this.fallsReadout = document.getElementById("falls-readout");
       this.boostFill = document.getElementById("boost-fill");
       this.speedReadout = document.getElementById("speed-readout");
       this.timeReadout = document.getElementById("time-readout");
@@ -139,12 +139,7 @@ window.MMR = window.MMR || {};
     }
 
     updateHud(game) {
-      const sp = U.clamp(game.shield / CFG.SHIELD_MAX, 0, 1);
-      this.shieldFill.style.width = (sp * 100) + "%";
-      this.shieldFill.style.background =
-        sp > 0.5 ? "linear-gradient(90deg,#39ff88,#2ff3ff)"
-        : sp > 0.25 ? "linear-gradient(90deg,#ffb627,#ff7b2f)"
-        : "linear-gradient(90deg,#ff3b53,#ff7b2f)";
+      if (this.fallsReadout) this.fallsReadout.textContent = game.falls || 0;
 
       this.boostFill.style.width = (U.clamp(game.boost.meter / game.boost.max, 0, 1) * 100) + "%";
       this.warnReadout.textContent = game.pedestrianHits;
@@ -254,6 +249,16 @@ window.MMR = window.MMR || {};
           if (world.grid[gy][gx] === 1)
             ctx.fillRect(gx * sx, gy * sy, Math.ceil(sx), Math.ceil(sy));
 
+      // void hazards (deadly drops) — dark pits with a red rim
+      if (world.voids) {
+        for (const v of world.voids) {
+          ctx.fillStyle = "rgba(0,0,0,0.9)";
+          ctx.fillRect(v.gx * sx, v.gy * sy, Math.ceil(sx), Math.ceil(sy));
+          ctx.strokeStyle = "rgba(255,59,83,0.85)"; ctx.lineWidth = 1;
+          ctx.strokeRect(v.gx * sx + 0.5, v.gy * sy + 0.5, Math.ceil(sx) - 1, Math.ceil(sy) - 1);
+        }
+      }
+
       // obstacles
       ctx.fillStyle = "rgba(255,182,39,0.6)";
       for (const o of world.obstacles)
@@ -267,7 +272,7 @@ window.MMR = window.MMR || {};
         ctx.beginPath(); ctx.arc(vs.vx, vs.vy, vs.r, 0, Math.PI * 2); ctx.fill();
       }
 
-      // shield pickups
+      // score gems
       for (const p of world.pickups) {
         if (p.taken) continue;
         ctx.fillStyle = "rgba(57,255,136,0.95)";
