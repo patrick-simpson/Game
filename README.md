@@ -20,6 +20,7 @@ No backend or build step is required.
 | Steer | `←` / `→` | Drag the steering wheel |
 | Faster / Slower | `↑` / `↓` | **GO / FAST / SLOW / STOP** buttons |
 | Quick Go / Stop / Fast | `G` / `S` / `F` | — |
+| Reverse | `R` (hold) | **REVERSE** button (hold) |
 | Fire Laser | `Space` | **LASER** button |
 | Jump Rocket | `J` / `Shift` | **JUMP** button |
 | Nitro Boost | `B` (hold) | **BOOST** button |
@@ -42,6 +43,15 @@ No backend or build step is required.
   trail, and your blinking location — but it **never reveals the VIP**. A
   directional **rescue beacon** only appears once you are close. Reach the VIP
   to complete the rescue and beat your best time.
+
+### Comfort & difficulty
+
+The camera is **north-up and stable** by default (the maze no longer spins
+around you) — you can switch to the harder rotating "cockpit" view in the
+pause menu. The default difficulty is **Easy**, the shield slowly regenerates
+when you avoid damage, crashing only bumps you (it never force-stops the car),
+pedestrians dodge out of your way, and an always-on **compass** points toward
+the VIP without revealing the exact tile.
 
 ## Highlights
 

@@ -229,6 +229,18 @@ window.MMR = window.MMR || {};
       for (const o of world.obstacles)
         ctx.fillRect(o.gx * sx + sx * 0.2, o.gy * sy + sy * 0.2, sx * 0.6, sy * 0.6);
 
+      // Fix #18: on EASY, paint a soft "sector" glow over the VIP's general
+      // area — enough to steer toward, never enough to pinpoint the tile.
+      if (world.diff && world.diff.reveal && world.vip) {
+        const vx = (world.vip.x / world.pixelW) * w;
+        const vy = (world.vip.y / world.pixelH) * h;
+        const g = ctx.createRadialGradient(vx, vy, 2, vx, vy, w * 0.22);
+        g.addColorStop(0, "rgba(255,215,80,0.28)");
+        g.addColorStop(1, "rgba(255,215,80,0)");
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(vx, vy, w * 0.22, 0, Math.PI * 2); ctx.fill();
+      }
+
       // shield pickups
       for (const p of world.pickups) {
         if (p.taken) continue;
@@ -260,12 +272,22 @@ window.MMR = window.MMR || {};
       ctx.arc(0, 0, 26, -0.5, 0.5); ctx.closePath(); ctx.fill();
       ctx.restore();
 
-      // blinking player dot
-      if (this._blink < 38) {
-        ctx.fillStyle = "#2ff3ff"; ctx.shadowColor = "#2ff3ff"; ctx.shadowBlur = 10;
-        ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
+      // blinking player dot (Fix #18: larger + steady halo so it's easy to find)
+      ctx.fillStyle = "rgba(47,243,255,0.25)";
+      ctx.beginPath(); ctx.arc(px, py, 7, 0, Math.PI * 2); ctx.fill();
+      if (this._blink < 40) {
+        ctx.fillStyle = "#2ff3ff"; ctx.shadowColor = "#2ff3ff"; ctx.shadowBlur = 12;
+        ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill();
         ctx.shadowBlur = 0;
       }
+
+      // North indicator (the map is always north-up)
+      ctx.fillStyle = "rgba(180,220,255,0.7)";
+      ctx.font = "bold 10px Consolas, monospace";
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      ctx.fillText("N", w - 10, 4);
+      ctx.strokeStyle = "rgba(180,220,255,0.7)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(w - 10, 14); ctx.lineTo(w - 10, 20); ctx.stroke();
     }
   }
 

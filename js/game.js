@@ -37,7 +37,7 @@ window.MMR = window.MMR || {};
       this.world = null;
       this.car = { x: 0, y: 0, angle: -Math.PI / 2 };
       this.steer = 0; this.steerHeld = false;
-      this.keyLeft = false; this.keyRight = false; this.keyBoost = false;
+      this.keyLeft = false; this.keyRight = false; this.keyBoost = false; this.keyReverse = false;
 
       this.speedMode = "STOP";
       this.shield = CFG.SHIELD_MAX;
@@ -46,10 +46,11 @@ window.MMR = window.MMR || {};
       this.score = 0; this.finalScore = 0;
       this.elapsedMs = 0;
 
-      this.selectedDiff = "NORMAL";
+      this.selectedDiff = "EASY"; // Fix #14: default to the gentle preset
       this.state = "intro";
 
       this.hitCooldown = 0;
+      this.regenTimer = 0;
       this.jump = { active: false, timer: 0, cooldown: 0 };
       this.laser = { cooldown: 0, beam: null };
       this.boost = { meter: 100, max: 100, active: false, burst: 0 };
@@ -58,6 +59,8 @@ window.MMR = window.MMR || {};
       this.fireworks = [];
       this.shake = 0;
       this.camY = 0.62;
+      this.leadX = 0; this.leadY = 0;
+      this.viewCx = 480; this.viewCy = 215;
       this.flashLevel = 0;
       this.explored = new Set();
 
@@ -78,7 +81,8 @@ window.MMR = window.MMR || {};
 
     // ---------------- persistence / settings ----------------
     _loadSettings() {
-      let s = { shake: true, reducedMotion: false, muted: false };
+      // Fix #1: stable north-up camera by default (rotateView off)
+      let s = { shake: true, reducedMotion: false, muted: false, rotateView: false };
       try {
         const raw = localStorage.getItem("umd_settings");
         if (raw) s = Object.assign(s, JSON.parse(raw));
@@ -95,9 +99,11 @@ window.MMR = window.MMR || {};
       const sh = document.getElementById("opt-shake");
       const mo = document.getElementById("opt-motion");
       const mu = document.getElementById("opt-mute");
+      const rv = document.getElementById("opt-rotate");
       if (sh) sh.checked = this.settings.shake;
       if (mo) mo.checked = this.settings.reducedMotion;
       if (mu) mu.checked = this.settings.muted;
+      if (rv) rv.checked = this.settings.rotateView;
       this._updateMuteIcon();
     }
     _bestKey() { return "umd_best_" + this.selectedDiff; }
@@ -137,12 +143,27 @@ window.MMR = window.MMR || {};
       this.boost = { meter: 100, max: 100, active: false, burst: 0 };
       this.explosions = []; this.exhaust = []; this.fireworks = [];
       this.shake = 0; this.camY = 0.62; this.flashLevel = 0;
+      this.leadX = 0; this.leadY = 0;
+      this.hitCooldown = CFG.START_GRACE; // Fix #13: spawn protection
+      this.regenTimer = 0;
+      this.keyReverse = false; this.keyBoost = false;
       this.explored = new Set();
       this.state = "playing";
       this.dashboard.setActiveSpeed("STOP");
       this._hideOverlay();
       this.pauseOverlay.classList.remove("show");
+      this._showToast("Press GO (or ↑) to drive — reach the VIP!");
       this._resize();
+    }
+
+    // Fix #19: brief onboarding / status toast
+    _showToast(msg) {
+      const t = document.getElementById("toast");
+      if (!t) return;
+      t.textContent = msg;
+      t.classList.add("show");
+      clearTimeout(this._toastTimer);
+      this._toastTimer = setTimeout(() => t.classList.remove("show"), 3200);
     }
 
     _hideOverlay() { this.overlay.classList.remove("overlay-show"); this._clearConfetti(); }
@@ -182,6 +203,7 @@ window.MMR = window.MMR || {};
           case " ": case "Spacebar": this.fireLaser(); e.preventDefault(); break;
           case "j": case "J": case "Shift": this.doJump(); break;
           case "b": case "B": this.keyBoost = true; break;
+          case "r": case "R": this.keyReverse = true; break; // Fix #6: reverse
           case "g": case "G": this.setSpeedMode("GO"); break;
           case "s": case "S": this.setSpeedMode("STOP"); break;
           case "f": case "F": this.setSpeedMode("FAST"); break;
@@ -197,6 +219,7 @@ window.MMR = window.MMR || {};
         if (e.key === "ArrowLeft") this.keyLeft = false;
         if (e.key === "ArrowRight") this.keyRight = false;
         if (e.key === "b" || e.key === "B") this.keyBoost = false;
+        if (e.key === "r" || e.key === "R") this.keyReverse = false;
       });
     }
 
@@ -218,6 +241,18 @@ window.MMR = window.MMR || {};
       bind("opt-shake", "shake");
       bind("opt-motion", "reducedMotion");
       bind("opt-mute", "muted");
+      bind("opt-rotate", "rotateView");
+
+      // Fix #6: reverse button (press-and-hold)
+      const rev = document.getElementById("reverse-btn");
+      if (rev) {
+        const on = (e) => { this.keyReverse = true; e.preventDefault(); };
+        const off = () => { this.keyReverse = false; };
+        rev.addEventListener("mousedown", on);
+        rev.addEventListener("touchstart", on, { passive: false });
+        window.addEventListener("mouseup", off);
+        window.addEventListener("touchend", off);
+      }
     }
 
     _wireIntro() {
@@ -321,28 +356,33 @@ window.MMR = window.MMR || {};
       this.elapsedMs += dtMs;
       const car = this.car, w = this.world;
 
-      // steering
+      // steering (Fix #7: snappier centering, responsive but stable)
       const turning = this.keyLeft || this.keyRight;
-      if (this.keyLeft) this.steer = U.clamp(this.steer - 0.14, -1, 1);
-      if (this.keyRight) this.steer = U.clamp(this.steer + 0.14, -1, 1);
-      if (!turning && !this.steerHeld) this.steer *= 0.80;
+      if (this.keyLeft) this.steer = U.clamp(this.steer - 0.16, -1, 1);
+      if (this.keyRight) this.steer = U.clamp(this.steer + 0.16, -1, 1);
+      if (!turning && !this.steerHeld) this.steer *= 0.72;
 
-      // boost state
+      // boost state (forward only)
       const wantBoost = (this.keyBoost || this.boost.burst > 0);
-      this.boost.active = wantBoost && this.boost.meter > 0 && CFG.SPEEDS[this.speedMode] > 0;
+      this.boost.active = wantBoost && !this.keyReverse && this.boost.meter > 0 && CFG.SPEEDS[this.speedMode] > 0;
       if (this.boost.burst > 0) this.boost.burst--;
       if (this.boost.active) this.boost.meter = Math.max(0, this.boost.meter - 1.2);
       else this.boost.meter = Math.min(this.boost.max, this.boost.meter + 0.35);
 
+      // Fix #6: reverse gear takes priority over the forward speed mode
       let speed = CFG.SPEEDS[this.speedMode];
       if (this.boost.active) speed *= CFG.BOOST_MULT;
+      let moveSpeed = speed, dir = 1;
+      if (this.keyReverse) { moveSpeed = CFG.REVERSE_SPEED; dir = -1; }
 
-      const turnFactor = speed > 0 ? 1 : 0.65;
+      // turning works even while crawling so you can line up shots / escapes
+      const turnFactor = moveSpeed > 0 ? 1 : 0.65;
       car.angle += this.steer * CFG.TURN_RATE * turnFactor;
 
-      // movement + collision
-      if (speed > 0) {
-        const dx = Math.cos(car.angle) * speed, dy = Math.sin(car.angle) * speed;
+      // movement + collision (Fix #2: bump-and-slide, never a forced full stop)
+      if (moveSpeed > 0) {
+        const vx = Math.cos(car.angle) * moveSpeed * dir;
+        const vy = Math.sin(car.angle) * moveSpeed * dir;
         let crashed = false;
         const blocked = (px, py) => {
           const col = w.carCollision(px, py, CFG.CAR_RADIUS);
@@ -351,19 +391,18 @@ window.MMR = window.MMR || {};
           if (col.kind === "obstacle") return !this.jump.active;
           return false;
         };
-        if (!blocked(car.x + dx, car.y)) car.x += dx; else crashed = true;
-        if (!blocked(car.x, car.y + dy)) car.y += dy; else crashed = true;
-        if (crashed && this.hitCooldown === 0) {
-          this._damage(CFG.WALL_HIT_DAMAGE);
-          this.setSpeedMode("STOP");
-        }
-        // exhaust trail (Improvement #8)
+        // axis-separated so the car slides smoothly along walls
+        if (!blocked(car.x + vx, car.y)) car.x += vx; else crashed = true;
+        if (!blocked(car.x, car.y + vy)) car.y += vy; else crashed = true;
+        if (crashed && this.hitCooldown === 0) this._damage(CFG.WALL_HIT_DAMAGE);
+
+        // exhaust trail (behind the direction of travel)
         if (Math.random() < (this.boost.active ? 0.9 : 0.5)) {
           this.exhaust.push({
-            x: car.x - Math.cos(car.angle) * 16,
-            y: car.y - Math.sin(car.angle) * 16,
-            vx: -Math.cos(car.angle) * 0.6 + (Math.random() - 0.5),
-            vy: -Math.sin(car.angle) * 0.6 + (Math.random() - 0.5),
+            x: car.x - Math.cos(car.angle) * 16 * dir,
+            y: car.y - Math.sin(car.angle) * 16 * dir,
+            vx: -Math.cos(car.angle) * 0.6 * dir + (Math.random() - 0.5),
+            vy: -Math.sin(car.angle) * 0.6 * dir + (Math.random() - 0.5),
             life: 24, max: 24, boost: this.boost.active
           });
         }
@@ -393,6 +432,12 @@ window.MMR = window.MMR || {};
       if (this.flashLevel > 0) this.flashLevel = Math.max(0, this.flashLevel - 0.05);
       if (this.hitCooldown > 0) this.hitCooldown--;
 
+      // Fix #5: shield slowly regenerates once you've avoided damage a while
+      this.regenTimer++;
+      if (this.regenTimer > CFG.REGEN_DELAY && this.shield < CFG.SHIELD_MAX) {
+        this.shield = Math.min(CFG.SHIELD_MAX, this.shield + CFG.SHIELD_REGEN);
+      }
+
       // camera look-ahead (Improvement #17)
       let targetCam = 0.6 + (CFG.SPEEDS[this.speedMode] / CFG.SPEEDS.FAST) * 0.08 + (this.boost.active ? 0.03 : 0);
       this.camY += (targetCam - this.camY) * 0.06;
@@ -405,7 +450,7 @@ window.MMR = window.MMR || {};
       this._updateBeacon();
 
       // live score (Improvement #12)
-      this.score = Math.max(0, this.kills * 100 + this.cells * 25 - this.pedestrianHits * 50);
+      this.score = Math.max(0, this.kills * 100 + this.cells * 25 - this.pedestrianHits * 20);
 
       // win / lose
       if (U.dist(car.x, car.y, w.vip.x, w.vip.y) < CFG.VIP_REACH) this._win();
@@ -418,8 +463,19 @@ window.MMR = window.MMR || {};
     _damage(amount) {
       this.shield = Math.max(0, this.shield - amount);
       this.hitCooldown = CFG.HIT_COOLDOWN;
+      this.regenTimer = 0; // Fix #5: pause regen after taking a hit
       this._addShake(10);
       this.flashLevel = 1; // red damage flash (Improvement #10)
+    }
+
+    // Fix #14: push the car away from whatever it hit so you don't get
+    // pinned looping into the same enemy.
+    _knockback(nx, ny, amount) {
+      for (let step = amount; step > 0; step -= 4) {
+        const tx = this.car.x + nx * 4, ty = this.car.y + ny * 4;
+        if (this.world.carCollision(tx, ty, CFG.CAR_RADIUS)) break;
+        this.car.x = tx; this.car.y = ty;
+      }
     }
 
     _entityCollisions() {
@@ -430,17 +486,17 @@ window.MMR = window.MMR || {};
         const er = e.type === "driver" ? 16 : e.type === "creature" ? 14 : 11;
         if (U.dist(car.x, car.y, e.x, e.y) < CFG.CAR_RADIUS + er) {
           if (e.type === "pedestrian") {
+            // Fix #4: pure warning — no shield loss for clipping a pedestrian
             this.pedestrianHits++;
-            this.shield = Math.max(0, this.shield - 5);
             this.dashboard.flashWarning();
             this.audio.warn();
-            this.flashLevel = Math.max(this.flashLevel, 0.5);
             e.cool = 50;
             const ang = Math.atan2(e.y - car.y, e.x - car.x);
-            e.x += Math.cos(ang) * 14; e.y += Math.sin(ang) * 14;
+            e.x += Math.cos(ang) * 16; e.y += Math.sin(ang) * 16;
           } else if (this.hitCooldown === 0) {
             this._damage(CFG.HOSTILE_HIT_DAMAGE);
-            this.setSpeedMode("STOP");
+            const ang = Math.atan2(car.y - e.y, car.x - e.x);
+            this._knockback(Math.cos(ang), Math.sin(ang), 20);
             e.cool = 30;
           }
         }
@@ -468,25 +524,30 @@ window.MMR = window.MMR || {};
       this.explosions.push({ x, y, color, timer: 22, max: 22, bits });
     }
 
+    // Fix #11 & #20: an always-on directional compass to the VIP (it points
+    // the way without ever revealing the exact tile), with a radar ping that
+    // warms up as you close in.
     _updateBeacon() {
       const w = this.world, car = this.car;
       const d = U.dist(car.x, car.y, w.vip.x, w.vip.y);
       const rangePx = CFG.BEACON_RANGE * CFG.TILE;
-      if (d > rangePx) { this.beacon.classList.remove("on"); return; }
       const intensity = U.clamp(1 - d / rangePx, 0, 1);
-      // screen-space angle (windshield is rotated so heading is up)
+
       const worldAng = Math.atan2(w.vip.y - car.y, w.vip.x - car.x);
-      const screenAng = worldAng - (car.angle + Math.PI / 2);
-      const radius = Math.min(this.vw, this.vh) * 0.32;
-      const cx = this.vw / 2, cy = this.vh * this.camY;
-      const bx = cx + Math.cos(screenAng) * radius;
-      const by = cy + Math.sin(screenAng) * radius;
+      // In north-up mode screen angle == world angle; in rotating mode the
+      // whole view is spun so heading points up.
+      const screenAng = this.settings.rotateView
+        ? worldAng - (car.angle + Math.PI / 2)
+        : worldAng;
+      const radius = Math.min(this.vw, this.vh) * 0.34;
+      const bx = this.viewCx + Math.cos(screenAng) * radius;
+      const by = this.viewCy + Math.sin(screenAng) * radius;
       this.beacon.style.left = bx + "px";
       this.beacon.style.top = by + "px";
-      this.beacon.style.transform = `translate(-50%,-50%) rotate(${screenAng}rad) scale(${0.8 + intensity * 0.6})`;
-      this.beacon.style.opacity = (0.4 + intensity * 0.6).toFixed(2);
+      this.beacon.style.transform = `translate(-50%,-50%) rotate(${screenAng}rad) scale(${0.8 + intensity * 0.5})`;
+      this.beacon.style.opacity = (0.45 + intensity * 0.55).toFixed(2);
       this.beacon.classList.add("on");
-      this.audio.ping(intensity);
+      if (d <= rangePx) this.audio.ping(intensity);
     }
 
     _win() {
@@ -621,24 +682,57 @@ window.MMR = window.MMR || {};
       if (!this.world) { this._renderIdle(ctx, W, H); return; }
 
       const car = this.car;
-      const cx = W / 2, cy = H * this.camY;
+      const rotate = this.settings.rotateView;
       const shakeAmt = (this.settings.shake && !this.settings.reducedMotion) ? this.shake : 0;
       const sxk = (Math.random() - 0.5) * shakeAmt;
       const syk = (Math.random() - 0.5) * shakeAmt;
 
+      // Fix #1 & #17: north-up stable camera with smooth look-ahead, or the
+      // optional rotating "cockpit" view.
+      const speedFactor = (this.keyReverse ? 0 : CFG.SPEEDS[this.speedMode] / CFG.SPEEDS.FAST);
+      let cx, cy;
+      if (rotate) {
+        cx = W / 2; cy = H * this.camY;
+      } else {
+        cx = W / 2; cy = H / 2;
+        const lead = 90;
+        const tlx = Math.cos(car.angle) * lead * speedFactor;
+        const tly = Math.sin(car.angle) * lead * speedFactor;
+        this.leadX += (tlx - this.leadX) * 0.07;
+        this.leadY += (tly - this.leadY) * 0.07;
+      }
+      this.viewCx = cx; this.viewCy = cy;
+
       ctx.save();
       ctx.translate(cx + sxk, cy + syk);
-      ctx.rotate(-(car.angle + Math.PI / 2));
-      ctx.translate(-car.x, -car.y);
+      if (rotate) {
+        ctx.rotate(-(car.angle + Math.PI / 2));
+        ctx.translate(-car.x, -car.y);
+      } else {
+        ctx.translate(-(car.x + this.leadX), -(car.y + this.leadY));
+      }
       this._renderWorld(ctx);
+      if (!rotate) {
+        // car lives in the world for the stable camera (rotates to heading)
+        ctx.save();
+        ctx.translate(car.x, car.y);
+        ctx.rotate(car.angle + Math.PI / 2);
+        this._paintCar(ctx);
+        ctx.restore();
+      }
       ctx.restore();
 
-      this._renderCar(ctx, cx + sxk, cy + syk);
+      if (rotate) {
+        ctx.save();
+        ctx.translate(cx + sxk, cy + syk);
+        this._paintCar(ctx);
+        ctx.restore();
+      }
 
       // speed lines (Improvement #9)
       if (!this.settings.reducedMotion &&
           (this.speedMode === "FAST" || this.boost.active)) {
-        this._renderSpeedLines(ctx, W, H);
+        this._renderSpeedLines(ctx, cx, cy);
       }
 
       const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.9);
@@ -819,11 +913,10 @@ window.MMR = window.MMR || {};
       ctx.restore();
     }
 
-    _renderSpeedLines(ctx, W, H) {
+    _renderSpeedLines(ctx, cx, cy) {
       ctx.save();
       ctx.strokeStyle = "rgba(180,230,255,0.25)";
       ctx.lineWidth = 2;
-      const cx = W / 2, cy = H * this.camY;
       for (let i = 0; i < 10; i++) {
         const a = Math.random() * Math.PI * 2;
         const r0 = 60 + Math.random() * 40, r1 = r0 + 30 + Math.random() * 40;
@@ -836,10 +929,12 @@ window.MMR = window.MMR || {};
       ctx.restore();
     }
 
-    _renderCar(ctx, cx, cy) {
+    // Draws the car centred on the current transform origin, pointing "up"
+    // (local -y). Caller positions/rotates it for the active camera mode.
+    _paintCar(ctx) {
       const jumpScale = this.jump.active
         ? 1 + Math.sin((1 - this.jump.timer / CFG.JUMP_DURATION) * Math.PI) * 0.5 : 1;
-      ctx.save(); ctx.translate(cx, cy);
+      ctx.save();
 
       if (this.jump.active) {
         const lift = jumpScale - 1;

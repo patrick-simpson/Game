@@ -12,29 +12,36 @@ window.MMR = window.MMR || {};
   // ---- Global tuning constants (shared across modules) ----
   const CONFIG = {
     TILE: 64,
-    CAR_RADIUS: 16,
-    SPEEDS: { STOP: 0, SLOW: 1.4, GO: 2.8, FAST: 4.8 },
+    CAR_RADIUS: 15,
+    // Fix #8: rebalanced speeds for finer control (lower top speed)
+    SPEEDS: { STOP: 0, SLOW: 1.3, GO: 2.3, FAST: 3.6 },
+    REVERSE_SPEED: 1.6,   // Fix #6: reverse gear
     BOOST_MULT: 1.7,
-    TURN_RATE: 0.052,
+    TURN_RATE: 0.055,
     SHIELD_MAX: 100,
-    WALL_HIT_DAMAGE: 16,
-    HOSTILE_HIT_DAMAGE: 22,
-    HIT_COOLDOWN: 45,
+    // Fix #3: much gentler damage
+    WALL_HIT_DAMAGE: 5,
+    HOSTILE_HIT_DAMAGE: 11,
+    HIT_COOLDOWN: 60,     // Fix #16: longer invulnerability after a hit
+    START_GRACE: 150,     // Fix #13: spawn protection frames
+    SHIELD_REGEN: 0.05,   // Fix #5: shield auto-regen per frame
+    REGEN_DELAY: 150,     // frames of no damage before regen kicks in
     LASER_RANGE: 360,
     LASER_COOLDOWN: 26,
     JUMP_DURATION: 42,
     JUMP_COOLDOWN: 70,
-    VIP_REACH: 30,
-    SHIELD_PICKUP: 28,    // shield restored per repair cell
-    BEACON_RANGE: 6       // in cells: how close before the rescue beacon appears
+    VIP_REACH: 44,        // Fix #12: forgiving arrival radius
+    SHIELD_PICKUP: 34,
+    BEACON_RANGE: 8       // ping range in cells
   };
   M.CONFIG = CONFIG;
 
-  // ---- Difficulty presets (Improvement #3) ----
+  // ---- Difficulty presets (rebalanced for playability) ----
+  // Fix #9, #10, #14, #15, #19: gentler enemies, smaller mazes, more pickups.
   const DIFFICULTY = {
-    EASY:   { cols: 11, rows: 11, pedestrians: 4, creatures: 3, drivers: 3, obstacles: 7,  pickups: 4, enemyScale: 0.8,  homing: 0.0  },
-    NORMAL: { cols: 13, rows: 13, pedestrians: 7, creatures: 6, drivers: 5, obstacles: 10, pickups: 3, enemyScale: 1.0,  homing: 0.35 },
-    HARD:   { cols: 17, rows: 17, pedestrians: 9, creatures: 8, drivers: 7, obstacles: 14, pickups: 2, enemyScale: 1.25, homing: 0.6  }
+    EASY:   { cols: 9,  rows: 9,  pedestrians: 4, creatures: 2, drivers: 2, obstacles: 5,  pickups: 5, enemyScale: 0.7,  homing: 0.0,  reveal: true  },
+    NORMAL: { cols: 12, rows: 12, pedestrians: 6, creatures: 4, drivers: 3, obstacles: 8,  pickups: 4, enemyScale: 0.9,  homing: 0.15, reveal: false },
+    HARD:   { cols: 15, rows: 15, pedestrians: 8, creatures: 6, drivers: 5, obstacles: 12, pickups: 3, enemyScale: 1.15, homing: 0.4,  reveal: false }
   };
   M.DIFFICULTY = DIFFICULTY;
 
@@ -173,19 +180,22 @@ window.MMR = window.MMR || {};
         });
       };
 
-      for (let i = 0; i < this.diff.pedestrians; i++) make("pedestrian", 0.55);
-      for (let i = 0; i < this.diff.creatures; i++) make("creature", 0.9 * scale);
-      for (let i = 0; i < this.diff.drivers; i++) make("driver", 1.9 * scale);
+      for (let i = 0; i < this.diff.pedestrians; i++) make("pedestrian", 0.5);
+      for (let i = 0; i < this.diff.creatures; i++) make("creature", 0.8 * scale);
+      for (let i = 0; i < this.diff.drivers; i++) make("driver", 1.5 * scale);
     }
 
+    // Fix #15: VIP is far from start but NOT jammed into the single worst
+    // corner — pick randomly among the farthest open cells so routes vary
+    // and aren't always maximally punishing.
     _placeVip() {
-      const cells = this._openCells();
-      let best = null, bestScore = -1;
-      for (const c of cells) {
-        const dd = Math.abs(c.gx - this.start.gx) + Math.abs(c.gy - this.start.gy);
-        const score = dd + (c.gx + c.gy) * 0.4;
-        if (score > bestScore && !this.isObstacleAt(c.gx, c.gy)) { bestScore = score; best = c; }
-      }
+      const cells = this._openCells().filter((c) => !this.isObstacleAt(c.gx, c.gy));
+      cells.forEach((c) => {
+        c._d = Math.abs(c.gx - this.start.gx) + Math.abs(c.gy - this.start.gy);
+      });
+      cells.sort((a, b) => b._d - a._d);
+      const pool = cells.slice(0, Math.max(1, Math.ceil(cells.length * 0.22)));
+      const best = U.pick(pool);
       const ctr = this.tileCenter(best.gx, best.gy);
       this.vip = { x: ctr.x, y: ctr.y, gx: best.gx, gy: best.gy, bob: 0 };
     }
@@ -208,8 +218,9 @@ window.MMR = window.MMR || {};
       }
     }
 
-    // Entities wander; drivers/creatures lightly home toward the player
-    // when within line-of-corridor range (Improvement #6).
+    // Entities wander. Hostiles lightly home toward the player (gentle,
+    // short-range). Pedestrians actively steer AWAY from the car so the
+    // player is far less likely to clip an innocent. (Fix #4, #9)
     updateEntities(px, py) {
       const homing = this.diff.homing;
       for (const e of this.entities) {
@@ -224,15 +235,24 @@ window.MMR = window.MMR || {};
           e.retarget = 80 + U.rand(160);
         }
 
-        // homing nudge for hostiles
-        if (homing > 0 && e.type !== "pedestrian" && px !== undefined) {
+        if (px !== undefined) {
           const d = U.dist(e.x, e.y, px, py);
-          if (d < CONFIG.TILE * 5 && d > 1) {
+          if (e.type === "pedestrian") {
+            // flee the car when it gets close
+            if (d < CONFIG.TILE * 2.2 && d > 1) {
+              const ax = (e.x - px) / d, ay = (e.y - py) / d;
+              e.vx += ax * e.speed * 0.5;
+              e.vy += ay * e.speed * 0.5;
+              const sp = Math.hypot(e.vx, e.vy) || 1;
+              e.vx = (e.vx / sp) * e.speed;
+              e.vy = (e.vy / sp) * e.speed;
+            }
+          } else if (homing > 0 && d < CONFIG.TILE * 3.5 && d > 1) {
+            // gentle, shorter-range homing for hostiles
             const hx = (px - e.x) / d, hy = (py - e.y) / d;
             const k = homing * (e.type === "driver" ? 1 : 0.6);
-            e.vx += hx * e.speed * k * 0.12;
-            e.vy += hy * e.speed * k * 0.12;
-            // clamp to its speed
+            e.vx += hx * e.speed * k * 0.08;
+            e.vy += hy * e.speed * k * 0.08;
             const sp = Math.hypot(e.vx, e.vy) || 1;
             e.vx = (e.vx / sp) * e.speed;
             e.vy = (e.vy / sp) * e.speed;

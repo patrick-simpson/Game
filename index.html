@@ -63,15 +63,18 @@
         <!-- VIP rescue beacon — appears only when close (Improvement #11) -->
         <div id="vip-beacon"><span class="beacon-arrow">&#10148;</span><span class="beacon-label">VIP</span></div>
 
+        <!-- Onboarding / status toast -->
+        <div id="toast"></div>
+
         <!-- Control hint strip (Improvement #19) -->
         <div id="help-strip">
           <span><b>&larr;&rarr;</b> Steer</span>
           <span><b>&uarr;&darr;</b> Speed</span>
+          <span><b>R</b> Reverse</span>
           <span><b>Space</b> Laser</span>
           <span><b>J</b> Jump</span>
           <span><b>B</b> Boost</span>
           <span><b>P</b> Pause</span>
-          <span><b>M</b> Mute</span>
           <span><b>H</b> Hide</span>
         </div>
 
@@ -92,8 +95,8 @@
             <div class="diff-select">
               <span class="diff-label">DIFFICULTY</span>
               <div class="diff-row">
-                <button class="diff-btn" data-diff="EASY">EASY</button>
-                <button class="diff-btn active" data-diff="NORMAL">NORMAL</button>
+                <button class="diff-btn active" data-diff="EASY">EASY</button>
+                <button class="diff-btn" data-diff="NORMAL">NORMAL</button>
                 <button class="diff-btn" data-diff="HARD">HARD</button>
               </div>
             </div>
@@ -108,6 +111,7 @@
           <div class="overlay-card">
             <h1 class="overlay-title">PAUSED</h1>
             <div class="settings">
+              <label class="toggle"><input type="checkbox" id="opt-rotate" /> Rotating view (harder)</label>
               <label class="toggle"><input type="checkbox" id="opt-shake" checked /> Screen shake</label>
               <label class="toggle"><input type="checkbox" id="opt-motion" /> Reduce motion</label>
               <label class="toggle"><input type="checkbox" id="opt-mute" /> Mute audio</label>
@@ -141,6 +145,9 @@
           <button class="dash-btn action-btn" id="boost-btn">
             <span class="btn-icon">&#187;</span> BOOST
             <span class="cd-bar"><i id="boost-cd"></i></span>
+          </button>
+          <button class="dash-btn action-btn" id="reverse-btn">
+            <span class="btn-icon">&#9660;</span> REVERSE
           </button>
         </div>
       </div>
