@@ -58,6 +58,7 @@ window.MMR = window.MMR || {};
 
       this.selectedDiff = "EASY"; // Fix #14: default to the gentle preset
       this.state = "intro";
+      this.demoMode = false;
 
       this.hitCooldown = 0;
       this.regenTimer = 0;
@@ -298,12 +299,13 @@ window.MMR = window.MMR || {};
       this.hitCooldown = CFG.START_GRACE; // Fix #13: spawn protection
       this.regenTimer = 0;
       this.keyReverse = false; this.keyBoost = false;
+      this.demoMode = false;
       this.explored = new Set();
       this.state = "playing";
       this.dashboard.setActiveSpeed("STOP");
       this._hideOverlay();
       this.pauseOverlay.classList.remove("show");
-      this._showToast("Press GO (or ↑) to drive — reach the VIP!");
+      this._showToast("Press GO (or ↑) to drive — reach the VIP! (or DEMO to watch)");
       this._resize();
     }
 
@@ -411,6 +413,10 @@ window.MMR = window.MMR || {};
       // Fix #6: reverse button (press-and-hold) via the shared touch helper
       this._touchPress(document.getElementById("reverse-btn"),
         () => { this.keyReverse = true; }, () => { this.keyReverse = false; });
+
+      // Demo mode button
+      const demoBtn = document.getElementById("demo-btn");
+      if (demoBtn) demoBtn.addEventListener("click", () => this._toggleDemo());
     }
 
     // ---------------- touch controls (A1-A3) ----------------
@@ -511,6 +517,22 @@ window.MMR = window.MMR || {};
     }
     _toggleHelp() { this.helpStrip.classList.toggle("hidden"); }
 
+    _toggleDemo() {
+      if (this.state !== "playing") return;
+      this.demoMode = !this.demoMode;
+      if (this.demoMode) {
+        this._showToast("DEMO MODE — automated navigation");
+        // Ensure car is moving
+        if (this.speedMode === "STOP") this.setSpeedMode("GO");
+      } else {
+        this._showToast("Demo mode disabled");
+        // Stop auto-steering
+        this.keyLeft = false; this.keyRight = false;
+      }
+      const btn = document.getElementById("demo-btn");
+      if (btn) btn.classList.toggle("active", this.demoMode);
+    }
+
     _shiftSpeed(dir) {
       const order = ["STOP", "SLOW", "GO", "FAST"];
       let i = order.indexOf(this.speedMode);
@@ -591,11 +613,16 @@ window.MMR = window.MMR || {};
       this.elapsedMs += dtMs;
       const car = this.car, w = this.world;
 
-      // steering (Fix #7: snappier centering, responsive but stable)
-      const turning = this.keyLeft || this.keyRight;
-      if (this.keyLeft) this.steer = U.clamp(this.steer - 0.16, -1, 1);
-      if (this.keyRight) this.steer = U.clamp(this.steer + 0.16, -1, 1);
-      if (!turning && !this.steerHeld) this.steer *= 0.72;
+      // Demo mode auto-steering
+      if (this.demoMode) {
+        this._updateDemoSteering();
+      } else {
+        // steering (Fix #7: snappier centering, responsive but stable)
+        const turning = this.keyLeft || this.keyRight;
+        if (this.keyLeft) this.steer = U.clamp(this.steer - 0.16, -1, 1);
+        if (this.keyRight) this.steer = U.clamp(this.steer + 0.16, -1, 1);
+        if (!turning && !this.steerHeld) this.steer *= 0.72;
+      }
 
       // boost state (forward only)
       const wantBoost = (this.keyBoost || this.boost.burst > 0);
@@ -764,6 +791,47 @@ window.MMR = window.MMR || {};
     // Fix #11 & #20: an always-on directional compass to the VIP (it points
     // the way without ever revealing the exact tile), with a radar ping that
     // warms up as you close in.
+    _updateDemoSteering() {
+      const car = this.car, w = this.world;
+      const vx = w.vip.x - car.x, vy = w.vip.y - car.y;
+      const targetAngle = Math.atan2(vy, vx);
+      const currentAngle = car.angle;
+      let angleDiff = targetAngle - currentAngle;
+      // Normalize to [-π, π]
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+
+      // Cast rays ahead to detect obstacles (check 5 angles: forward + 4 offset angles)
+      const checkDistance = 60;
+      const rays = [0, -Math.PI / 6, Math.PI / 6, -Math.PI / 3, Math.PI / 3];
+      const obstacles = [];
+      for (const offset of rays) {
+        const checkAngle = currentAngle + offset;
+        const px = car.x + Math.cos(checkAngle) * checkDistance;
+        const py = car.y + Math.sin(checkAngle) * checkDistance;
+        const blocked = w.carCollision(px, py, CFG.CAR_RADIUS);
+        obstacles.push({ offset, blocked: !!blocked });
+      }
+
+      // Find the clearest steering direction
+      const center = obstacles[0]; // straight ahead
+      let steerTarget = angleDiff / Math.PI; // normalized target (-1 to 1)
+
+      if (center.blocked) {
+        // Obstacle ahead: find the clearest side
+        const leftClear = !obstacles[1].blocked || !obstacles[3].blocked;
+        const rightClear = !obstacles[2].blocked || !obstacles[4].blocked;
+        if (leftClear && !rightClear) steerTarget = -0.8;
+        else if (rightClear && !leftClear) steerTarget = 0.8;
+        else if (leftClear && rightClear) steerTarget = angleDiff > 0 ? -0.6 : 0.6;
+        else steerTarget = angleDiff > 0 ? 0.9 : -0.9; // both bad, pick based on VIP angle
+      }
+
+      // Smoothly adjust steer (not instant)
+      const steerAccel = 0.12;
+      this.steer = U.clamp(this.steer + U.clamp(steerTarget - this.steer, -steerAccel, steerAccel), -1, 1);
+    }
+
     _updateBeacon() {
       const w = this.world, car = this.car;
       const d = U.dist(car.x, car.y, w.vip.x, w.vip.y);
