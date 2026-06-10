@@ -70,8 +70,10 @@ assert.ok(env.store["umd_best_NORMAL"], "best time persisted");
 assert.ok(env.store["umd_stats"], "stats persisted");
 step(20); // fireworks frames
 
-// ---- void fall restarts you at the start of the SAME maze (no shield) ----
+// ---- void fall: plunge sequence, then respawn at the start (no shield) ----
 G.startNew();
+assert.ok(Number.isFinite(G.world.startAngle), "world exposes a spawn heading");
+assert.strictEqual(G.car.angle, G.world.startAngle, "car spawns facing the corridor");
 const startTile = G.world.tileCenter(G.world.start.gx, G.world.start.gy);
 assert.ok(G.world.voids.length >= 1, "world has a void hazard");
 const v = G.world.voids[0];
@@ -81,8 +83,17 @@ G.car.x = vc.x; G.car.y = vc.y;
 step(2);
 assert.strictEqual(G.state, "playing", "falling into a void does NOT end the run");
 assert.strictEqual(G.falls, fallsBefore + 1, "void fall increments falls counter");
+assert.ok(G.falling > 0, "fall plunge sequence is running");
+assert.ok(Math.abs(G.car.x - vc.x) < 2, "car frozen mid-fall (controls dead)");
+step(60); // let the plunge finish
+assert.strictEqual(G.falling, 0, "fall sequence completes");
 assert.ok(Math.abs(G.car.x - startTile.x) < 2 && Math.abs(G.car.y - startTile.y) < 2,
-  "void fall sends the car back to the start tile");
+  "respawn puts the car back on the start tile");
+assert.strictEqual(G.car.angle, G.world.startAngle, "respawn faces the corridor again");
+// lifetime falls are folded into stats on the next win
+G.car.x = G.world.vip.x; G.car.y = G.world.vip.y;
+step(2);
+assert.ok(G.stats.totalFalls >= 1, "lifetime totalFalls recorded");
 
 // ---- top-down view still renders without error ----
 G.settings.firstPerson = false;

@@ -428,6 +428,7 @@ html, body {
 .dot.player  { background: var(--neon-cyan); box-shadow: 0 0 8px var(--neon-cyan); }
 .dot.hostile { background: var(--neon-red); box-shadow: 0 0 8px var(--neon-red); }
 .dot.heal    { background: var(--neon-green); box-shadow: 0 0 8px var(--neon-green); } /* B6 */
+.dot.void    { background: #06070c; border: 1px solid var(--neon-red); box-shadow: 0 0 6px var(--neon-red); }
 
 /* Responsive squeeze */
 @media (max-width: 880px) {
@@ -542,6 +543,7 @@ html, body {
 /* --- Difficulty selector --- */
 .diff-select { margin: 14px 0 6px; }
 .diff-label { display: block; font-size: 11px; letter-spacing: 3px; color: var(--neon-cyan); margin-bottom: 8px; }
+.diff-note { margin: 8px 0 0; font-size: 10.5px; letter-spacing: 0.5px; color: var(--text-soft); }
 .diff-row { display: flex; gap: 10px; justify-content: center; }
 .diff-btn {
   flex: 1; max-width: 130px;

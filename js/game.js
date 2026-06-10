@@ -10,6 +10,7 @@ window.MMR = window.MMR || {};
 
   const CFG = M.CONFIG;
   const U = M.U;
+  const FALL_TICKS = 48; // length of the void-fall plunge (~0.8s at 60Hz)
 
   class Game {
     constructor() {
@@ -61,7 +62,7 @@ window.MMR = window.MMR || {};
       this.demoMode = false;
 
       this.hitCooldown = 0;
-      this.regenTimer = 0;
+      this.falling = 0; // ticks left in the void-fall sequence
       this.jump = { active: false, timer: 0, cooldown: 0 };
       this.laser = { cooldown: 0, beam: null };
       this.boost = { meter: 100, max: 100, active: false, burst: 0 };
@@ -125,7 +126,7 @@ window.MMR = window.MMR || {};
     _loadStats() {
       let s = {
         runs: 0, wins: 0, losses: 0, bestScore: 0,
-        totalKills: 0, totalCells: 0, totalPedHits: 0, totalTimeMs: 0,
+        totalKills: 0, totalCells: 0, totalPedHits: 0, totalFalls: 0, totalTimeMs: 0,
         byDiff: { EASY: 0, NORMAL: 0, HARD: 0 }
       };
       try {
@@ -229,37 +230,67 @@ window.MMR = window.MMR || {};
       floor.addColorStop(0.5, "#2c2415");
       floor.addColorStop(1, "#161109");    // dark dirt underfoot
       this._fpFloor = floor;
+      // cockpit hood (depends on H, so rebuilt here on every resize)
+      const hood = ctx.createLinearGradient(0, H * 0.82, 0, H);
+      hood.addColorStop(0, "#13202f"); hood.addColorStop(0.25, "#0c1622"); hood.addColorStop(1, "#05080d");
+      this._hoodGrad = hood;
     }
 
-    // B2: pre-render one wall + floor tile to offscreen canvases (once)
+    // B2: pre-render the top-down jungle tiles to offscreen canvases (once):
+    // mossy foliage walls, a dirt-path floor, and a deadly void pit.
     _buildTiles() {
       const T = CFG.TILE;
-      // wall tile with faux-3D bevel
+      // jungle wall: dense foliage over mossy stone, bevelled so it reads raised
       const wc = document.createElement("canvas");
       wc.width = T; wc.height = T;
       const w = wc.getContext("2d");
       const g = w.createLinearGradient(0, 0, 0, T);
-      g.addColorStop(0, "#1b3a6b"); g.addColorStop(1, "#0e2348");
+      g.addColorStop(0, "#1f4d27"); g.addColorStop(1, "#0d2412");
       w.fillStyle = g; w.fillRect(0, 0, T, T);
-      // top/left highlight, bottom/right shadow → reads as raised
-      w.strokeStyle = "rgba(120,200,255,0.35)"; w.lineWidth = 2;
+      // leaf clumps
+      for (let n = 0; n < 22; n++) {
+        const lx = Math.random() * T, ly = Math.random() * T;
+        w.fillStyle = `rgba(${24 + U.rand(36)},${80 + U.rand(80)},${36 + U.rand(36)},0.75)`;
+        w.beginPath(); w.ellipse(lx, ly, 4 + Math.random() * 5, 2 + Math.random() * 3,
+          Math.random() * Math.PI, 0, Math.PI * 2); w.fill();
+      }
+      // top/left highlight, bottom/right shadow → reads as raised hedge
+      w.strokeStyle = "rgba(150,230,140,0.35)"; w.lineWidth = 2;
       w.beginPath(); w.moveTo(1, T - 1); w.lineTo(1, 1); w.lineTo(T - 1, 1); w.stroke();
-      w.strokeStyle = "rgba(0,0,0,0.45)";
+      w.strokeStyle = "rgba(0,0,0,0.5)";
       w.beginPath(); w.moveTo(T - 1, 1); w.lineTo(T - 1, T - 1); w.lineTo(1, T - 1); w.stroke();
-      w.strokeStyle = "rgba(47,243,255,0.5)"; w.lineWidth = 2;
-      w.strokeRect(1, 1, T - 2, T - 2);
-      w.strokeStyle = "rgba(120,200,255,0.18)"; w.lineWidth = 1;
-      w.strokeRect(5, 5, T - 10, T - 10);
       this._wallTile = wc;
 
-      // floor tile
+      // dirt-path floor with speckles
       const fc = document.createElement("canvas");
       fc.width = T; fc.height = T;
       const f = fc.getContext("2d");
-      f.fillStyle = "#0c1626"; f.fillRect(0, 0, T, T);
-      f.strokeStyle = "rgba(47,243,255,0.06)"; f.lineWidth = 1;
+      f.fillStyle = "#2a2113"; f.fillRect(0, 0, T, T);
+      for (let n = 0; n < 18; n++) {
+        f.fillStyle = `rgba(${60 + U.rand(40)},${48 + U.rand(30)},${24 + U.rand(18)},0.5)`;
+        f.fillRect(U.rand(T), U.rand(T), 2 + U.rand(3), 1 + U.rand(2));
+      }
+      f.strokeStyle = "rgba(0,0,0,0.25)"; f.lineWidth = 1;
       f.strokeRect(0.5, 0.5, T - 1, T - 1);
       this._floorTile = fc;
+
+      // void pit: near-black drop with a warning rim
+      const vc = document.createElement("canvas");
+      vc.width = T; vc.height = T;
+      const v = vc.getContext("2d");
+      const vg = v.createRadialGradient(T / 2, T / 2, 4, T / 2, T / 2, T * 0.7);
+      vg.addColorStop(0, "#000"); vg.addColorStop(0.7, "#06040a"); vg.addColorStop(1, "#1a0a10");
+      v.fillStyle = vg; v.fillRect(0, 0, T, T);
+      v.strokeStyle = "rgba(255,59,83,0.7)"; v.lineWidth = 3;
+      v.strokeRect(2, 2, T - 4, T - 4);
+      v.strokeStyle = "rgba(255,59,83,0.25)"; v.lineWidth = 1;
+      // cracked edges
+      for (let n = 0; n < 5; n++) {
+        const ax = U.rand(T), ay = U.rand(T);
+        v.beginPath(); v.moveTo(ax, ay);
+        v.lineTo(ax + U.rand(16) - 8, ay + U.rand(16) - 8); v.stroke();
+      }
+      this._voidTile = vc;
     }
 
     // B4: pre-render creature + driver sprites (glow baked in), drawn rotated
@@ -297,9 +328,10 @@ window.MMR = window.MMR || {};
       this.audio.init();
       this.world = new M.World(this.selectedDiff);
       const s = this.world.tileCenter(this.world.start.gx, this.world.start.gy);
-      this.car.x = s.x; this.car.y = s.y; this.car.angle = -Math.PI / 2;
+      this.car.x = s.x; this.car.y = s.y;
+      this.car.angle = this.world.startAngle;
       this.steer = 0; this.speedMode = "STOP";
-      this.falls = 0;
+      this.falls = 0; this.falling = 0;
       this.pedestrianHits = 0; this.kills = 0; this.cells = 0;
       this.score = 0; this.finalScore = 0; this.elapsedMs = 0;
       this.hitCooldown = 0;
@@ -310,7 +342,6 @@ window.MMR = window.MMR || {};
       this.shake = 0; this.camY = 0.62; this.flashLevel = 0;
       this.leadX = 0; this.leadY = 0;
       this.hitCooldown = CFG.START_GRACE; // Fix #13: spawn protection
-      this.regenTimer = 0;
       this.keyReverse = false; this.keyBoost = false;
       this.demoMode = false;
       this.explored = new Set();
@@ -488,10 +519,10 @@ window.MMR = window.MMR || {};
         body.innerHTML = `
           <div><span>RUNS</span><b>${s.runs}</b></div>
           <div><span>RESCUES</span><b>${s.wins}</b></div>
-          <div><span>WIPEOUTS</span><b>${s.losses}</b></div>
+          <div><span>VOID FALLS</span><b>${s.totalFalls || 0}</b></div>
           <div><span>BEST SCORE</span><b>${s.bestScore}</b></div>
           <div><span>THREATS DOWN</span><b>${s.totalKills}</b></div>
-          <div><span>CELLS</span><b>${s.totalCells}</b></div>
+          <div><span>GEMS</span><b>${s.totalCells}</b></div>
           <div><span>PED. HITS</span><b>${s.totalPedHits}</b></div>
           <div><span>PLAYTIME</span><b>${fmt}</b></div>
           <div><span>EASY/NORM/HARD</span><b>${s.byDiff.EASY}/${s.byDiff.NORMAL}/${s.byDiff.HARD}</b></div>`;
@@ -624,7 +655,17 @@ window.MMR = window.MMR || {};
     // ---------------- main update ----------------
     _update(dtMs) {
       if (this.state !== "playing") return;
-      this.elapsedMs += dtMs;
+      this.elapsedMs += dtMs; // the clock keeps running — falls cost time
+
+      // mid-fall: the car is plunging, controls are dead until respawn
+      if (this.falling > 0) {
+        this.falling--;
+        if (this.falling === 0) this._respawn();
+        this.dashboard.updateHud(this);
+        this.dashboard.updateCooldowns(this);
+        return;
+      }
+
       const car = this.car, w = this.world;
 
       // Demo mode auto-steering
@@ -671,7 +712,15 @@ window.MMR = window.MMR || {};
         // harmless now — they just stop you; only a void can end the run.
         if (!blocked(car.x + vx, car.y)) car.x += vx; else crashed = true;
         if (!blocked(car.x, car.y + vy)) car.y += vy; else crashed = true;
-        if (crashed && this.hitCooldown === 0) { this._addShake(3); this.hitCooldown = 8; }
+        if (crashed) {
+          this.audio.scrape();
+          if (this.hitCooldown === 0) {
+            this._addShake(3); this.hitCooldown = 8;
+            this._spawnSparkle(
+              car.x + Math.cos(car.angle) * 14 * dir,
+              car.y + Math.sin(car.angle) * 14 * dir, "#ffcf6e", 5);
+          }
+        }
 
         // exhaust trail (behind the direction of travel)
         if (Math.random() < (this.boost.active ? 0.9 : 0.5)) {
@@ -732,21 +781,32 @@ window.MMR = window.MMR || {};
     }
 
     // The only way to fail: drive off the route into a void. We don't end the
-    // run — we just send you back to the start of the SAME maze to try again.
+    // run — the camera plunges, the screen fades, and you respawn at the start
+    // of the SAME maze to try again (the mission clock keeps ticking).
     _fall() {
-      if (this.state !== "playing") return;
+      if (this.state !== "playing" || this.falling > 0) return;
       this.falls = (this.falls || 0) + 1;
-      const w = this.world, s = w.tileCenter(w.start.gx, w.start.gy);
-      this.car.x = s.x; this.car.y = s.y; this.car.angle = -Math.PI / 2;
-      this.steer = 0; this.setSpeedMode("STOP");
+      this.falling = FALL_TICKS;
+      this.setSpeedMode("STOP");
       this.boost.active = false; this.boost.burst = 0;
+      this.audio.silenceEngine();
+      this.audio.fall();
+      this._addShake(14);
+      this.flashLevel = 0.5;
+      this._haptic([60, 30, 60]);
+      this._showToast("You drove into the void!");
+    }
+
+    _respawn() {
+      const w = this.world, s = w.tileCenter(w.start.gx, w.start.gy);
+      this.car.x = s.x; this.car.y = s.y;
+      this.car.angle = w.startAngle;
+      this.steer = 0;
+      this.keyReverse = false;
       this.hitCooldown = CFG.START_GRACE;
       this.leadX = 0; this.leadY = 0;
-      this.flashLevel = 1;
-      this._addShake(16);
-      this.audio.crash();
-      this._haptic([60, 30, 60]);
-      this._showToast("Fell into the void — back to the start!");
+      this.flashLevel = 0; this.shake = 0;
+      this._showToast("Back at the start — try another turn!");
     }
 
     // Fix #14: push the car away from whatever it hit so you don't get
@@ -801,9 +861,9 @@ window.MMR = window.MMR || {};
       }
     }
 
-    _spawnSparkle(x, y, color) {
+    _spawnSparkle(x, y, color, n = 10) {
       const bits = [];
-      for (let i = 0; i < 10; i++) {
+      for (let i = 0; i < n; i++) {
         const ang = Math.random() * Math.PI * 2, spd = 0.8 + Math.random() * 2;
         bits.push({ x, y, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd, size: 3 + U.rand(4) });
       }
@@ -898,20 +958,8 @@ window.MMR = window.MMR || {};
       this._recordStats(true);
       this._haptic([40, 40, 80]);
       this._seedFireworks();
-      this._renderEndCard(true, newBest);
+      this._renderEndCard(newBest);
     }
-    _lose() {
-      if (this.state !== "playing") return;
-      this.state = "lost";
-      this.beacon.classList.remove("on");
-      this.audio.silenceEngine();
-      this.audio.gameover();
-      this.finalScore = this.score;
-      this._recordStats(false);
-      this._haptic([80, 40, 80]);
-      this._renderEndCard(false, false);
-    }
-
     // C6: fold this run into lifetime stats and persist
     _recordStats(won) {
       const s = this.stats;
@@ -922,44 +970,31 @@ window.MMR = window.MMR || {};
       s.totalKills += this.kills;
       s.totalCells += this.cells;
       s.totalPedHits += this.pedestrianHits;
+      s.totalFalls = (s.totalFalls || 0) + (this.falls || 0);
       s.totalTimeMs += Math.round(this.elapsedMs);
       this._saveStats();
     }
 
-    _renderEndCard(won, newBest) {
+    // Only a win card now: a void fall restarts you in-place, so a run can
+    // no longer end in failure.
+    _renderEndCard(newBest) {
       const card = this.overlay.querySelector(".overlay-card");
       const time = this.dashboard._fmtTime(this.elapsedMs);
-      if (won) {
-        card.innerHTML = `
-          <h1 class="overlay-title win">VIP RESCUED!</h1>
-          <p class="overlay-sub">MISSION COMPLETE</p>
-          <div class="stat-grid">
-            <div><span>TIME</span><b>${time}${newBest ? " &#11088;" : ""}</b></div>
-            <div><span>SCORE</span><b>${this.finalScore}</b></div>
-            <div><span>VOID FALLS</span><b>${this.falls || 0}</b></div>
-            <div><span>THREATS DOWN</span><b>${this.kills}</b></div>
-            <div><span>GEMS</span><b>${this.cells}</b></div>
-            <div><span>PED. HITS</span><b>${this.pedestrianHits}</b></div>
-          </div>
-          ${newBest ? '<p class="overlay-best new">NEW BEST TIME!</p>' : ""}
-          ${this._lifetimeRow()}
-          <button id="again-btn" class="big-btn">PLAY AGAIN</button>
-          <button id="menu-btn" class="text-btn">Change difficulty</button>`;
-      } else {
-        card.innerHTML = `
-          <h1 class="overlay-title lose">CAR DESTROYED</h1>
-          <p class="overlay-sub">MISSION FAILED</p>
-          <div class="stat-grid">
-            <div><span>TIME</span><b>${time}</b></div>
-            <div><span>SCORE</span><b>${this.finalScore}</b></div>
-            <div><span>THREATS DOWN</span><b>${this.kills}</b></div>
-            <div><span>PED. HITS</span><b>${this.pedestrianHits}</b></div>
-          </div>
-          <p class="overlay-text">The rescue target is still out there. Try a new route.</p>
-          ${this._lifetimeRow()}
-          <button id="again-btn" class="big-btn">TRY AGAIN</button>
-          <button id="menu-btn" class="text-btn">Change difficulty</button>`;
-      }
+      card.innerHTML = `
+        <h1 class="overlay-title win">VIP RESCUED!</h1>
+        <p class="overlay-sub">MISSION COMPLETE</p>
+        <div class="stat-grid">
+          <div><span>TIME</span><b>${time}${newBest ? " &#11088;" : ""}</b></div>
+          <div><span>SCORE</span><b>${this.finalScore}</b></div>
+          <div><span>VOID FALLS</span><b>${this.falls || 0}</b></div>
+          <div><span>THREATS DOWN</span><b>${this.kills}</b></div>
+          <div><span>GEMS</span><b>${this.cells}</b></div>
+          <div><span>PED. HITS</span><b>${this.pedestrianHits}</b></div>
+        </div>
+        ${newBest ? '<p class="overlay-best new">NEW BEST TIME!</p>' : ""}
+        ${this._lifetimeRow()}
+        <button id="again-btn" class="big-btn">PLAY AGAIN</button>
+        <button id="menu-btn" class="text-btn">Change difficulty</button>`;
       this._showOverlay();
       const again = document.getElementById("again-btn");
       const menu = document.getElementById("menu-btn");
@@ -1064,6 +1099,7 @@ window.MMR = window.MMR || {};
         }
         if (!this._vignetteGrad) this._buildViewGradients();
         ctx.fillStyle = this._vignetteGrad; ctx.fillRect(0, 0, W, H);
+        this._renderFallFade(ctx, W, H);
         return;
       }
 
@@ -1118,6 +1154,15 @@ window.MMR = window.MMR || {};
 
       if (!this._vignetteGrad) this._buildViewGradients();
       ctx.fillStyle = this._vignetteGrad; ctx.fillRect(0, 0, W, H);
+      this._renderFallFade(ctx, W, H);
+    }
+
+    // fade to black while plunging into a void, lifting as you respawn
+    _renderFallFade(ctx, W, H) {
+      if (this.falling <= 0) return;
+      const p = 1 - this.falling / FALL_TICKS;
+      ctx.fillStyle = "rgba(0,0,0," + (p * 0.92).toFixed(3) + ")";
+      ctx.fillRect(0, 0, W, H);
     }
 
     _renderIdle(ctx, W, H) {
@@ -1141,14 +1186,16 @@ window.MMR = window.MMR || {};
       if (!this._jungleWall) this._buildJungleTextures();
       if (!this._spr) this._buildBillboards();
 
-      // a little vertical bob from shake / jumping for "in the seat" feel
+      // a little vertical bob from shake / jumping for "in the seat" feel;
+      // during a void fall the whole view plunges downward
       const lift = this.jump.active
         ? Math.sin((1 - this.jump.timer / CFG.JUMP_DURATION) * Math.PI) * 40 : 0;
-      const horizon = Math.round(H * 0.52 + syk - lift);
+      const fallP = this.falling > 0 ? 1 - this.falling / FALL_TICKS : 0;
+      const horizon = Math.round(H * 0.52 + syk - lift - fallP * H * 0.45);
 
       // canopy + forest floor
-      ctx.fillStyle = this._fpCanopy; ctx.fillRect(0, 0, W, horizon);
-      ctx.fillStyle = this._fpFloor; ctx.fillRect(0, horizon, W, H - horizon);
+      ctx.fillStyle = this._fpCanopy; ctx.fillRect(0, 0, W, Math.max(0, horizon));
+      ctx.fillStyle = this._fpFloor; ctx.fillRect(0, Math.max(0, horizon), W, H - horizon);
 
       const FOV = Math.PI / 3;                 // 60° field of view
       const focal = (W / 2) / Math.tan(FOV / 2);
@@ -1161,6 +1208,25 @@ window.MMR = window.MMR || {};
       const tex = this._jungleWall, voidTex = this._voidEdge;
       const posX = car.x / T, posY = car.y / T;
       const maxFog = 9 * T; // full darkness distance
+
+      // scrolling floor bands: anchored to world distance along the heading,
+      // so they stream toward you as you drive — the main sense of speed
+      if (!this.settings.reducedMotion) {
+        const spacing = T * 0.75;
+        const proj = car.x * Math.cos(car.angle) + car.y * Math.sin(car.angle);
+        const off = spacing - (((proj % spacing) + spacing) % spacing);
+        ctx.strokeStyle = "rgba(0,0,0,0.45)";
+        for (let m = 0; m < 14; m++) {
+          const d = off + m * spacing;
+          if (d < 10) continue;
+          const y = horizon + (focal * (T / 2)) / d;
+          if (y > H || y < horizon) continue;
+          ctx.globalAlpha = U.clamp(1 - d / maxFog, 0.04, 0.5);
+          ctx.lineWidth = Math.max(1, (focal * 4) / d);
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
 
       for (let i = 0; i < cols; i++) {
         const sx = i * STEP;
@@ -1224,18 +1290,21 @@ window.MMR = window.MMR || {};
       // ---- billboard sprites (entities, VIP, gems, obstacles) ----
       const cosA = Math.cos(car.angle), sinA = Math.sin(car.angle);
       const list = [];
-      const add = (x, y, img, worldH, floatY) => {
+      // vOff lifts the sprite off the ground (world px); wScale squashes the
+      // width (used to make gems spin)
+      const add = (x, y, img, worldH, floatY, vOff = 0, wScale = 1) => {
         const dx = x - car.x, dy = y - car.y;
         const depth = dx * cosA + dy * sinA;       // forward distance (px)
         if (depth < 12) return;                    // behind / on top of camera
         const sideways = -dx * sinA + dy * cosA;
         const screenX = W / 2 + (sideways / depth) * focal;
         const spriteH = (focal * worldH) / depth;
-        const spriteW = spriteH * (img.width / img.height);
+        const spriteW = spriteH * (img.width / img.height) * wScale;
         if (screenX + spriteW < 0 || screenX - spriteW > W) return;
         // feet on the floor; floating things (gems) ride at eye level
         const feetY = horizon + (focal * (T / 2)) / depth;
-        const topY = floatY ? horizon - spriteH / 2 : feetY - spriteH;
+        let topY = floatY ? horizon - spriteH / 2 : feetY - spriteH;
+        topY -= (focal * vOff) / depth;
         list.push({ depth, screenX, spriteW, spriteH, topY, img });
       };
 
@@ -1246,28 +1315,65 @@ window.MMR = window.MMR || {};
       for (const p of w.pickups) {
         if (p.taken) continue;
         p.bob += 0.08;
-        add(p.x, p.y + Math.sin(p.bob) * 4, this._spr.gem, T * 0.5, true);
+        // bob up and down and spin like a collectible should
+        add(p.x, p.y, this._spr.gem, T * 0.5, true,
+          Math.sin(p.bob) * 7, 0.35 + 0.65 * Math.abs(Math.cos(p.bob)));
       }
       for (const e of w.entities) {
         if (!e.alive) continue;
         const img = e.type === "driver" ? this._spr.car
           : e.type === "creature" ? this._spr.monster : this._spr.human;
         const wh = e.type === "driver" ? T * 0.85 : e.type === "creature" ? T * 0.95 : T * 1.0;
-        add(e.x, e.y, img, wh, false);
+        // humans get a little walk-bounce; monsters a heavier lumber
+        const bob = e.type === "pedestrian" ? Math.abs(Math.sin(e.wobble * 2)) * 3
+          : e.type === "creature" ? Math.abs(Math.sin(e.wobble)) * 2 : 0;
+        add(e.x, e.y, img, wh, false, bob);
       }
       w.vip.bob += 0.06;
-      add(w.vip.x, w.vip.y + Math.sin(w.vip.bob) * 2, this._spr.vip, T * 1.05, false);
+      add(w.vip.x, w.vip.y, this._spr.vip, T * 1.05, false, Math.abs(Math.sin(w.vip.bob)) * 3);
 
       list.sort((a, b) => b.depth - a.depth); // far → near
       for (const s of list) this._blitBillboard(ctx, s, STEP);
 
-      // laser beam as a bright bolt down the centre when firing
+      // explosions / sparkles projected into the scene (kills, gems, scrapes)
+      for (const ex of this.explosions) {
+        const dx = ex.x - car.x, dy = ex.y - car.y;
+        const depth = dx * cosA + dy * sinA;
+        if (depth < 12) continue;
+        const sideways = -dx * sinA + dy * cosA;
+        const screenX = W / 2 + (sideways / depth) * focal;
+        const ci = Math.floor(screenX / STEP);
+        if (ci < 0 || ci >= cols || depth >= zbuf[ci]) continue;
+        const scale = focal / depth;
+        const baseY = horizon + (focal * (T * 0.18)) / depth;
+        const f = ex.timer / ex.max;
+        const palette = [ex.color, "#ffffff", "#ffb627", "#ffe9a8"];
+        ctx.globalAlpha = f;
+        ex.bits.forEach((b, i) => {
+          ctx.fillStyle = palette[i % palette.length];
+          const s = Math.max(1.2, b.size * f * scale * 0.5);
+          ctx.fillRect(screenX + (b.x - ex.x) * scale, baseY + (b.y - ex.y) * scale * 0.6, s, s);
+        });
+        ctx.globalAlpha = 1;
+      }
+
+      // laser: twin bolts from the fenders converging down-range
       if (this.laser.beam && this.laser.beam.life > 0) {
         const a = this.laser.beam.life / 12;
+        const hitY = horizon + 6;
         ctx.save();
         ctx.globalAlpha = a;
-        ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.shadowColor = "#ff2bd6"; ctx.shadowBlur = 14;
-        ctx.beginPath(); ctx.moveTo(W / 2, horizon + 10); ctx.lineTo(W / 2, horizon - 40); ctx.stroke();
+        ctx.lineCap = "round";
+        for (const xo of [0.32, 0.68]) {
+          ctx.strokeStyle = "rgba(255,43,214,0.55)"; ctx.lineWidth = 7;
+          ctx.shadowColor = "#ff2bd6"; ctx.shadowBlur = 16;
+          ctx.beginPath(); ctx.moveTo(W * xo, H * 0.84); ctx.lineTo(W / 2, hitY); ctx.stroke();
+          ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.5;
+          ctx.beginPath(); ctx.moveTo(W * xo, H * 0.84); ctx.lineTo(W / 2, hitY); ctx.stroke();
+        }
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "#ffe9ff";
+        ctx.beginPath(); ctx.arc(W / 2, hitY, 5 * a + 2, 0, Math.PI * 2); ctx.fill();
         ctx.restore();
       }
 
@@ -1298,12 +1404,8 @@ window.MMR = window.MMR || {};
       ctx.moveTo(W, 0); ctx.lineTo(W * 0.87, 0); ctx.lineTo(W, H * 0.5); ctx.closePath(); ctx.fill();
       // hood / dashboard lip at the bottom
       const hoodTop = H * 0.82;
-      const g = this._hoodGrad || (this._hoodGrad = (() => {
-        const gr = ctx.createLinearGradient(0, hoodTop, 0, H);
-        gr.addColorStop(0, "#13202f"); gr.addColorStop(0.25, "#0c1622"); gr.addColorStop(1, "#05080d");
-        return gr;
-      })());
-      ctx.fillStyle = g;
+      if (!this._hoodGrad) this._buildViewGradients();
+      ctx.fillStyle = this._hoodGrad;
       ctx.beginPath();
       ctx.moveTo(0, H); ctx.lineTo(0, hoodTop + 14);
       ctx.quadraticCurveTo(W / 2, hoodTop - 18, W, hoodTop + 14);
@@ -1523,7 +1625,9 @@ window.MMR = window.MMR || {};
         for (let gx = cgx - range; gx <= cgx + range; gx++) {
           if (gx < 0 || gy < 0 || gx >= w.gw || gy >= w.gh) continue;
           const x = gx * T, y = gy * T;
-          if (w.grid[gy][gx] === 1) this._drawWall(ctx, x, y, T);
+          const gval = w.grid[gy][gx];
+          if (gval === 1) this._drawWall(ctx, x, y, T);
+          else if (gval === 2) this._drawVoidTile(ctx, x, y);
           else this._drawFloor(ctx, x, y, T);
         }
       }
@@ -1569,6 +1673,11 @@ window.MMR = window.MMR || {};
       ctx.drawImage(this._wallTile, x, y);
     }
 
+    _drawVoidTile(ctx, x, y) {
+      if (!this._voidTile) this._buildTiles();
+      ctx.drawImage(this._voidTile, x, y);
+    }
+
     _drawObstacle(ctx, x, y, type) {
       ctx.save(); ctx.translate(x, y);
       if (type === "block") {
@@ -1600,6 +1709,29 @@ window.MMR = window.MMR || {};
       ctx.restore();
     }
 
+    // small human figure used for both the VIP and pedestrians in top-down
+    _drawHumanFigure(ctx, stepP, shirt, pants, waving) {
+      // legs (scissor as they walk)
+      ctx.strokeStyle = pants; ctx.lineWidth = 3; ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(-2, 4); ctx.lineTo(-2 - stepP * 3, 11);
+      ctx.moveTo(2, 4); ctx.lineTo(2 + stepP * 3, 11);
+      ctx.stroke();
+      // arms (swing opposite to legs; one raised if waving)
+      ctx.strokeStyle = shirt; ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(-5, -3); ctx.lineTo(-7, 2 + stepP * 2);
+      if (waving) { ctx.moveTo(5, -3); ctx.lineTo(9, -12); }
+      else { ctx.moveTo(5, -3); ctx.lineTo(7, 2 - stepP * 2); }
+      ctx.stroke();
+      // torso
+      ctx.fillStyle = shirt;
+      this._roundRect(ctx, -5, -6, 10, 12, 4); ctx.fill();
+      // head + hair
+      ctx.fillStyle = "#e8b07a"; ctx.beginPath(); ctx.arc(0, -10, 4.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#23344a"; ctx.beginPath(); ctx.arc(0, -11.5, 4.5, Math.PI, 0); ctx.fill();
+    }
+
     _drawVip(ctx, x, y, bob) {
       ctx.save(); ctx.translate(x, y + Math.sin(bob) * 3);
       const pr = 22 + Math.sin(bob * 1.5) * 4;
@@ -1607,9 +1739,7 @@ window.MMR = window.MMR || {};
       ctx.shadowColor = "#ffd750"; ctx.shadowBlur = 18;
       ctx.beginPath(); ctx.arc(0, 0, pr, 0, Math.PI * 2); ctx.stroke();
       ctx.shadowBlur = 0;
-      ctx.fillStyle = "#ffe9a8"; ctx.beginPath(); ctx.arc(0, -8, 6, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#ffd750"; ctx.beginPath();
-      ctx.moveTo(-7, 12); ctx.lineTo(0, -2); ctx.lineTo(7, 12); ctx.closePath(); ctx.fill();
+      this._drawHumanFigure(ctx, Math.sin(bob * 2) * 0.4, "#ffd24a", "#5a4a14", true);
       ctx.fillStyle = "#fff"; ctx.font = "bold 10px Consolas, monospace"; ctx.textAlign = "center";
       ctx.fillText("VIP", 0, -20);
       ctx.restore();
@@ -1617,10 +1747,7 @@ window.MMR = window.MMR || {};
 
     _drawPedestrian(ctx, e) {
       ctx.save(); ctx.translate(e.x, e.y);
-      const sway = Math.sin(e.wobble) * 2;
-      ctx.fillStyle = "#bdeaff"; ctx.beginPath(); ctx.arc(sway, -6, 4, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#6f9fd0"; ctx.beginPath();
-      ctx.moveTo(-4 + sway, 8); ctx.lineTo(sway, -2); ctx.lineTo(4 + sway, 8); ctx.closePath(); ctx.fill();
+      this._drawHumanFigure(ctx, Math.sin(e.wobble * 2), "#3f7ec4", "#243248", false);
       ctx.restore();
     }
 

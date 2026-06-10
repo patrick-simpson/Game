@@ -118,6 +118,13 @@ window.MMR = window.MMR || {};
       this.route = best.route;
       this.visited = best.visited;
       this.start = { gx: 1, gy: 1 };
+      // face the car down the first corridor at spawn (not into a wall)
+      if (this.route.length >= 2) {
+        const [a, b] = [this.route[0], this.route[1]];
+        this.startAngle = Math.atan2(b[1] - a[1], b[0] - a[0]);
+      } else {
+        this.startAngle = -Math.PI / 2;
+      }
       this._addBranches();
     }
 

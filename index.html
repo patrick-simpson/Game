@@ -12,7 +12,7 @@
     <!-- ===================== WINDSHIELD ===================== -->
     <section id="windshield">
       <div id="windshield-frame">
-        <canvas id="view" width="960" height="430" role="img" aria-label="Maze driving view"></canvas>
+        <canvas id="view" width="960" height="430" role="img" aria-label="First-person jungle driving view"></canvas>
 
         <!-- Damage feedback flash (Improvement #10) -->
         <div id="damage-flash"></div>
@@ -125,6 +125,7 @@
                 <button class="diff-btn" data-diff="NORMAL">NORMAL</button>
                 <button class="diff-btn" data-diff="HARD">HARD</button>
               </div>
+              <p class="diff-note">Easy: short &amp; straight &middot; Normal: longer route &middot; Hard: many decoys &amp; voids</p>
             </div>
 
             <p class="overlay-best">BEST TIME: <span id="best-time">--</span></p>
@@ -213,7 +214,8 @@
         <div class="map-legend">
           <span><i class="dot player"></i> YOU</span>
           <span><i class="dot hostile"></i> THREAT</span>
-          <span><i class="dot heal"></i> CELL</span>
+          <span><i class="dot heal"></i> GEM</span>
+          <span><i class="dot void"></i> VOID</span>
         </div>
       </div>
     </section>

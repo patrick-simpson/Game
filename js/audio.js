@@ -17,6 +17,7 @@ window.MMR = window.MMR || {};
       this.ready = false;
       this.engine = null; // {osc, sub, gain, filter}
       this._pingThrottle = 0;
+      this._scrapeThrottle = 0;
     }
 
     // Must be called from a user gesture (browser autoplay policy).
@@ -120,6 +121,18 @@ window.MMR = window.MMR || {};
     warn()    { this._tone(680, 0.09, "square", 0.14); setTimeout(() => this._tone(680, 0.09, "square", 0.14), 120); }
     pickup()  { this._tone(660, 0.09, "triangle", 0.16); setTimeout(() => this._tone(990, 0.12, "triangle", 0.16), 90); }
     boost()   { this._tone(220, 0.3, "sawtooth", 0.16, 660); }
+    // plunging into the void: a long descending howl + rushing air
+    fall() {
+      this._tone(520, 0.75, "sawtooth", 0.2, 55);
+      this._tone(760, 0.75, "sine", 0.12, 70);
+      this._noise(0.6, 0.22, 800);
+    }
+    // grinding along a wall (throttled so holding against a wall doesn't spam)
+    scrape() {
+      if (this._scrapeThrottle > 0) return;
+      this._scrapeThrottle = 9;
+      this._noise(0.09, 0.1, 2400);
+    }
 
     ping(intensity) {
       // throttled radar ping — louder/higher as the VIP nears
@@ -127,7 +140,10 @@ window.MMR = window.MMR || {};
       this._pingThrottle = Math.max(8, 40 - Math.floor(intensity * 32));
       this._tone(700 + intensity * 600, 0.07, "sine", 0.06 + intensity * 0.1);
     }
-    tickPing() { if (this._pingThrottle > 0) this._pingThrottle--; }
+    tickPing() {
+      if (this._pingThrottle > 0) this._pingThrottle--;
+      if (this._scrapeThrottle > 0) this._scrapeThrottle--;
+    }
 
     rescue() {
       const notes = [523, 659, 784, 1047];
